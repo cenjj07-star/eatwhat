@@ -1,0 +1,4170 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#f7f7f5">
+<meta name="description" content="今天吃啥：记录每一餐，选出下一顿。">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.92em' font-size='88'%3E%F0%9F%8D%9A%3C/text%3E%3C/svg%3E">
+<title>记录 · 今天吃啥</title>
+<style>
+  /* ================================================================
+     今天吃啥 — T1 骨架 + T2 存储 + T3 记录页
+     当前范围：三屏切换 / tabbar / 空状态 / IndexedDB 四表 / 拍照压缩 / 多菜录入 / 保存。
+     尚未接入：菜库聚合（T4）、推荐（T8-T9）、学习（T10）。
+     ================================================================ */
+
+  :root {
+    --bg: #f7f3ec;
+    --card: #fffdf9;
+    --ink: #241f19;
+    --muted: #756c5f;
+    --line: #e7dfd2;
+    --line-strong: #d5c9b8;
+    --accent: #cf3f1a;
+    --accent-ink: #9c2f10;
+    --accent-soft: #fbeae2;
+    --green: #3f7d5a;
+    --green-soft: #edf4ef;
+    --amber: #d9902f;
+    --amber-soft: #fdf3e3;
+    --shadow-card: 0 1px 2px rgba(90, 70, 40, .04);
+    --tab-h: 60px;
+  }
+
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  [hidden] { display: none !important; }
+  html, body { height: 100%; }
+
+  body {
+    margin: 0;
+    background: #ece4d7;
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC",
+                 "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    overflow: hidden;
+  }
+
+  button, select { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 8px; }
+
+  .sr-only {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+  }
+
+  /* ---------- 手机画布 ---------- */
+  #app {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    max-width: 440px;
+    height: 100vh;
+    height: 100dvh;
+    margin: 0 auto;
+    overflow: hidden;
+    background:
+      radial-gradient(120% 70% at 100% -10%, #fff8ec 0%, rgba(255, 248, 236, 0) 58%),
+      var(--bg);
+    box-shadow: 0 0 80px rgba(70, 52, 30, .14);
+  }
+
+  main { position: relative; flex: 1 1 auto; min-height: 0; }
+
+  .screen {
+    position: absolute;
+    inset: 0;
+    display: none;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 10px 18px 30px;
+    scrollbar-width: none;
+  }
+  .screen::-webkit-scrollbar { display: none; }
+  .screen.is-active {
+    display: block;
+    animation: screen-in .24s cubic-bezier(.22, .8, .35, 1);
+  }
+  @keyframes screen-in {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: none; }
+  }
+
+  /* ---------- 页头 ---------- */
+  .screen-head { padding: 18px 2px 4px; }
+  .eyebrow {
+    margin: 0 0 6px;
+    font-size: 11.5px;
+    font-weight: 600;
+    letter-spacing: .14em;
+    color: var(--muted);
+  }
+  h1 {
+    margin: 0;
+    font-size: 27px;
+    line-height: 1.22;
+    font-weight: 800;
+    letter-spacing: -.02em;
+  }
+  .num { color: var(--accent-ink); font-variant-numeric: tabular-nums; }
+  .screen-sub {
+    max-width: 30em;
+    margin: 8px 0 0;
+    font-size: 13px;
+    line-height: 1.65;
+    color: var(--muted);
+  }
+
+  /* ---------- 主页头图 ---------- */
+  .home-head { padding-top: 22px; }
+  .home-title {
+    position: relative;
+    display: inline-block;
+    padding: 0 2px;
+    font-size: 31px;
+    letter-spacing: -.03em;
+    background-image: linear-gradient(180deg, transparent 64%, var(--accent-soft) 64%, var(--accent-soft) 90%, transparent 90%);
+    border-radius: 6px;
+  }
+  .home-mark { color: var(--accent); }
+  .home-head .screen-sub { margin-top: 11px; }
+
+  /* ---------- 最近吃过 ---------- */
+  .recent { margin-top: 18px; }
+  .recent .field-top { margin-bottom: 8px; }
+  .recent-row {
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    padding: 2px 1px 6px;
+    scrollbar-width: none;
+  }
+  .recent-row::-webkit-scrollbar { display: none; }
+  .recent-chip {
+    flex: 0 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 106px;
+    max-width: 168px;
+    padding: 10px 12px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: var(--card);
+    text-align: left;
+    box-shadow: var(--shadow-card);
+  }
+  .recent-chip .recent-name {
+    overflow: hidden;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: -.01em;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .recent-chip .recent-meta {
+    overflow: hidden;
+    font-size: 10.5px;
+    color: var(--muted);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .recent .add-dish { margin-top: 6px; }
+
+  /* ---------- 空状态卡片 ---------- */
+  .empty-card {
+    margin-top: 20px;
+    padding: 26px 22px 22px;
+    text-align: center;
+    border: 1px solid rgba(213, 201, 184, .68);
+    border-radius: 26px;
+    background: linear-gradient(165deg, #fffdf9 0%, #fbf3e5 100%);
+    box-shadow: 0 26px 50px -42px rgba(90, 70, 40, .55);
+  }
+  .empty-art {
+    display: block;
+    width: 96px;
+    height: 96px;
+    margin: 0 auto 12px;
+  }
+  .empty-card h2 {
+    margin: 0;
+    font-size: 17px;
+    font-weight: 700;
+    letter-spacing: -.01em;
+  }
+  .empty-card p {
+    max-width: 24em;
+    margin: 7px auto 18px;
+    font-size: 13px;
+    line-height: 1.65;
+    color: var(--muted);
+  }
+
+  /* ---------- 按钮 ---------- */
+  .btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    width: 100%;
+    min-height: 50px;
+    padding: 0 18px;
+    border: 0;
+    border-radius: 16px;
+    font-size: 16px;
+    font-weight: 600;
+    transition: transform .12s ease, box-shadow .2s ease, background .2s ease;
+  }
+  .btn:active { transform: scale(.985); }
+  .btn-primary {
+    color: #fff;
+    background: var(--accent);
+    box-shadow: 0 10px 24px -12px rgba(207, 63, 26, .9);
+  }
+  .btn-primary:disabled {
+    color: #a69c8c;
+    background: #e7e0d4;
+    box-shadow: none;
+    cursor: default;
+    transform: none;
+  }
+  .btn-auto { width: auto; min-width: 148px; margin: 0 auto; padding: 0 26px; }
+
+  .link-btn {
+    padding: 4px 2px;
+    border: 0;
+    background: none;
+    color: var(--accent-ink);
+    font-size: 12.5px;
+    font-weight: 600;
+  }
+
+  /* ---------- 字段 ---------- */
+  .field { margin-top: 22px; }
+  .field-top {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 10px;
+  }
+  .field-label { font-size: 13px; font-weight: 600; }
+  .field-note {
+    margin-left: 6px;
+    font-style: normal;
+    font-weight: 400;
+    font-size: 11.5px;
+    color: var(--muted);
+  }
+  .field-actions { display: flex; align-items: baseline; gap: 2px; }
+  .sep { font-size: 11px; color: var(--line-strong); }
+
+  .select-wrap { position: relative; }
+  .select-wrap select {
+    width: 100%;
+    height: 46px;
+    padding: 0 42px 0 14px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: var(--card);
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--ink);
+    appearance: none;
+    -webkit-appearance: none;
+    box-shadow: var(--shadow-card);
+  }
+  .select-wrap::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    right: 17px;
+    width: 7px;
+    height: 7px;
+    border-right: 2px solid var(--muted);
+    border-bottom: 2px solid var(--muted);
+    transform: translateY(-70%) rotate(45deg);
+    pointer-events: none;
+  }
+
+  /* ---------- 这一餐的菜（T3） ---------- */
+  .draft { margin-top: 16px; }
+  .dish-list { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+
+  .dish {
+    display: grid;
+    grid-template-columns: 64px minmax(0, 1fr);
+    gap: 11px;
+    padding: 11px;
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    background: var(--card);
+    box-shadow: var(--shadow-card);
+  }
+
+  .thumb {
+    position: relative;
+    display: grid;
+    place-items: center;
+    gap: 1px;
+    width: 64px;
+    height: 64px;
+    padding: 0;
+    border: 1.5px dashed var(--line-strong);
+    border-radius: 14px;
+    background: var(--accent-soft);
+    color: var(--accent-ink);
+    overflow: hidden;
+  }
+  .thumb svg {
+    width: 21px;
+    height: 21px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .thumb-label { font-size: 9.5px; font-weight: 600; letter-spacing: .02em; }
+  .thumb img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  .thumb.has-photo { border: 1px solid var(--line); background: #d8d0c4; }
+  .thumb-again {
+    position: absolute;
+    right: 4px;
+    bottom: 4px;
+    padding: 1px 6px;
+    border-radius: 999px;
+    background: rgba(28, 24, 19, .62);
+    color: #fff;
+    font-size: 9.5px;
+    font-weight: 500;
+    line-height: 1.5;
+  }
+
+  .dish-body { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+  .dish-line { display: flex; align-items: center; gap: 4px; }
+  .dish-name {
+    flex: 1 1 auto;
+    width: 100%;
+    min-width: 0;
+    height: 38px;
+    padding: 0 10px;
+    border: 1px solid transparent;
+    border-radius: 10px;
+    background: #f4efe6;
+    color: var(--ink);
+    font-size: 15px;
+    font-weight: 600;
+  }
+  .dish-name::placeholder { color: #a99d8d; font-weight: 400; font-size: 13.5px; }
+  .dish-name:focus { outline: none; border-color: #e9a58f; background: #fff; }
+  .dish-del {
+    flex: 0 0 auto;
+    display: grid;
+    place-items: center;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    border: 0;
+    border-radius: 10px;
+    background: none;
+    color: #ab9f90;
+  }
+  .dish-del svg {
+    width: 14px;
+    height: 14px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+  }
+
+  .rating { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+  .rate {
+    min-height: 32px;
+    padding: 0 2px;
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    background: #fff;
+    color: var(--muted);
+    font-size: 12.5px;
+    font-weight: 600;
+    transition: background .16s ease, color .16s ease, border-color .16s ease;
+  }
+  .rate[aria-pressed="true"] { border-color: transparent; color: #fff; }
+  .rate-0[aria-pressed="true"] { background: #8d8272; }
+  .rate-1[aria-pressed="true"] { background: var(--amber); }
+  .rate-2[aria-pressed="true"] { background: var(--accent); }
+
+  .add-dish {
+    width: 100%;
+    min-height: 46px;
+    margin-top: 10px;
+    border: 1.5px dashed var(--line-strong);
+    border-radius: 16px;
+    background: rgba(255, 253, 249, .5);
+    color: var(--accent-ink);
+    font-size: 14px;
+    font-weight: 600;
+  }
+
+  .photo-suggest {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    margin-top: 2px;
+    padding: 7px 9px;
+    border-radius: 10px;
+    background: var(--green-soft);
+    color: #335e45;
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .photo-suggest .suggest-text { flex: 1 1 100%; line-height: 1.5; }
+  .photo-suggest em { font-style: normal; font-weight: 400; opacity: .72; }
+  .suggest-actions { display: flex; gap: 6px; margin-left: auto; }
+  .suggest-btn {
+    flex: 0 0 auto;
+    padding: 3px 9px;
+    border: 0;
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 700;
+  }
+  .suggest-yes { background: var(--green); color: #fff; }
+  .suggest-no { background: #fff; color: var(--muted); }
+
+  .name-suggest {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    margin-top: 6px;
+    padding: 6px 9px;
+    border-radius: 10px;
+    background: var(--amber-soft);
+    color: #7a5314;
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .name-suggest .name-suggest-text { flex: 1 1 100%; line-height: 1.5; }
+  .name-suggest em { font-style: normal; font-weight: 400; opacity: .72; }
+  .suggest-use { background: var(--amber); color: #fff; }
+
+  /* ---------- 看大图 ---------- */
+  .photo-view { position: fixed; inset: 0; z-index: 70; background: rgba(12, 10, 8, .95);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 14px; padding: 18px; }
+  .photo-view[hidden] { display: none; }
+  .photo-view img { max-width: 100%; max-height: 74vh; object-fit: contain; border-radius: 8px; }
+  .photo-view-meta { margin: 0; color: #efe9df; font-size: 13px; text-align: center; }
+  .photo-view-close { position: absolute; top: 12px; right: 14px; width: 40px; height: 40px;
+    border: 0; border-radius: 20px; background: rgba(255, 255, 255, .16); color: #fff;
+    font-size: 22px; line-height: 1; }
+  .history-thumb-btn { padding: 0; border: 0; background: none; display: block; }
+  .lib-row { gap: 12px; }
+  .lib-open { padding-left: 0; }
+  .lib-thumb-btn { flex: 0 0 auto; width: 52px; height: 52px; padding: 0; border: 0;
+    border-radius: 8px; overflow: hidden; background: #e6e1d8; }
+  .lib-thumb-btn img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .lib-thumb-empty { flex: 0 0 auto; width: 52px; height: 52px; border-radius: 8px;
+    background: #efeae1; }
+
+  /* ---------- 地点管理（T12 补） ---------- */
+  .field-links { display: inline-flex; align-items: center; gap: 14px; }
+  .place-list { display: flex; flex-direction: column; max-height: 46vh; overflow-y: auto; margin: 6px 0 10px; }
+  .place-row { display: flex; align-items: center; gap: 10px; padding: 11px 0; border-top: 1px solid var(--line); }
+  .place-row:first-child { border-top: none; }
+  .place-row .p-name { flex: 1 1 auto; min-width: 0; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; font-size: 15px; }
+  .place-row .p-walk { color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+  .place-row .link-btn { font-size: 13px; }
+  .place-row .link-btn.danger { color: #b3261e; }
+
+  /* ---------- 新增地点弹层（T3） ---------- */
+  dialog.sheet {
+    width: calc(100% - 36px);
+    max-width: 400px;
+    margin: auto;
+    padding: 22px 20px 18px;
+    border: 0;
+    border-radius: 22px;
+    background: var(--card);
+    color: var(--ink);
+    box-shadow: 0 24px 60px -18px rgba(50, 36, 20, .5);
+  }
+  dialog.sheet::backdrop { background: rgba(36, 31, 25, .42); }
+  dialog.sheet h2 { margin: 0 0 4px; font-size: 18px; font-weight: 800; letter-spacing: -.01em; }
+  .sheet-sub { margin: 0 0 14px; font-size: 12.5px; line-height: 1.6; color: var(--muted); }
+  .sheet-field { display: block; margin-top: 10px; font-size: 11.5px; font-weight: 600; color: var(--muted); }
+  .sheet-field input {
+    display: block;
+    width: 100%;
+    height: 44px;
+    margin-top: 6px;
+    padding: 0 12px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: #fff;
+    color: var(--ink);
+    font: inherit;
+    font-size: 15px;
+    font-weight: 600;
+  }
+  .sheet-field input:focus { outline: none; border-color: #e9a58f; }
+  .sheet-field select {
+    display: block;
+    width: 100%;
+    height: 44px;
+    margin-top: 6px;
+    padding: 0 36px 0 12px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: #fff;
+    color: var(--ink);
+    font: inherit;
+    font-size: 14px;
+    font-weight: 600;
+    appearance: none;
+    -webkit-appearance: none;
+  }
+  .sheet-field select:focus { outline: none; border-color: #e9a58f; }
+  .sheet-row { display: grid; grid-template-columns: minmax(0, 1fr) 96px; align-items: end; gap: 10px; }
+  .sheet-hint { margin: 10px 0 0; font-size: 12px; font-weight: 600; color: var(--accent-ink); }
+  .sheet-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 20px; }
+  .sheet-actions.single { grid-template-columns: 1fr; }
+  .sheet-actions .btn { min-height: 44px; border-radius: 13px; font-size: 15px; }
+  .btn-ghost { background: #f0e9de; color: #5f574c; }
+
+  /* ---------- 地点多选条 ---------- */
+  .places { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    min-height: 38px;
+    padding: 7px 13px 7px 10px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--card);
+    color: var(--ink);
+    font-size: 13px;
+    font-weight: 600;
+    transition: background .18s ease, border-color .18s ease, color .18s ease;
+  }
+  .chip .box {
+    display: grid;
+    place-items: center;
+    width: 16px;
+    height: 16px;
+    border: 1.5px solid var(--line-strong);
+    border-radius: 5px;
+    background: #fff;
+    transition: background .18s ease, border-color .18s ease;
+  }
+  .chip .box svg {
+    width: 10px;
+    height: 10px;
+    fill: none;
+    stroke: #fff;
+    stroke-width: 2.6;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    opacity: 0;
+  }
+  .chip[aria-pressed="true"] {
+    border-color: #e9a58f;
+    background: var(--accent-soft);
+    color: var(--accent-ink);
+  }
+  .chip[aria-pressed="true"] .box {
+    border-color: var(--accent);
+    background: var(--accent);
+  }
+  .chip[aria-pressed="true"] .box svg { opacity: 1; }
+  .chip .walk {
+    font-size: 11px;
+    font-weight: 400;
+    color: var(--muted);
+  }
+  .chip[aria-pressed="true"] .walk { color: var(--accent-ink); opacity: .72; }
+
+  /* ---------- 记录页保存区 ---------- */
+  .save-block { margin-top: 24px; }
+  .save-block.is-docked {
+    position: sticky;
+    bottom: 0;
+    z-index: 4;
+    margin-top: 14px;
+    padding: 24px 0 8px;
+    background: linear-gradient(180deg, rgba(247, 243, 236, 0) 0%, rgba(247, 243, 236, .96) 16%, #f7f3ec 32%);
+    box-shadow: 0 40px 0 0 #f7f3ec;
+    -webkit-backdrop-filter: blur(8px);
+    backdrop-filter: blur(8px);
+  }
+  .save-hint {
+    margin: 10px 0 0;
+    text-align: center;
+    font-size: 12px;
+    color: var(--muted);
+  }
+
+  /* ---------- 菜库列表（T4） ---------- */
+  .lib-list { margin: 16px 0 0; padding: 0; list-style: none; border-top: 1px solid var(--line); }
+  .lib-row {
+    display: flex;
+    align-items: center;
+    border-bottom: 1px solid var(--line);
+  }
+  .lib-open {
+    display: flex;
+    flex: 1 1 auto;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+    padding: 13px 2px;
+    border: 0;
+    background: none;
+    text-align: left;
+  }
+  .lib-more {
+    flex: 0 0 auto;
+    display: grid;
+    place-items: center;
+    width: 38px;
+    height: 38px;
+    padding: 0;
+    border: 0;
+    border-radius: 12px;
+    background: none;
+    color: #a79c8c;
+    font-size: 19px;
+    font-weight: 700;
+    line-height: 1;
+    letter-spacing: 1px;
+  }
+  .lib-more:active { background: #f0e9de; }
+  .lib-main { display: flex; flex: 1 1 auto; flex-direction: column; gap: 5px; min-width: 0; }
+  .lib-line { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+  .lib-name {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 15.5px;
+    font-weight: 700;
+    letter-spacing: -.01em;
+  }
+  .lib-meta { font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .lib-chev { flex: 0 0 auto; font-size: 18px; line-height: 1; color: var(--line-strong); }
+
+  .stars {
+    position: relative;
+    display: inline-block;
+    flex: 0 0 auto;
+    font-size: 12.5px;
+    line-height: 1;
+    letter-spacing: .5px;
+    color: #e0d7c9;
+  }
+  .stars-bg { display: block; }
+  .stars-fill { position: absolute; top: 0; left: 0; overflow: hidden; white-space: nowrap; color: var(--amber); }
+
+  /* ---------- 菜库详情（T4） ---------- */
+  .back-btn {
+    margin: 14px 0 0;
+    padding: 6px 2px;
+    border: 0;
+    background: none;
+    color: var(--accent-ink);
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .detail-head { padding-top: 6px; }
+  .detail-section { margin-top: 24px; }
+  .history-list { margin: 10px 0 0; padding: 0; list-style: none; }
+  .history-row {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    padding: 11px 2px;
+    border-bottom: 1px solid var(--line);
+  }
+  .history-thumb {
+    flex: 0 0 auto;
+    width: 42px;
+    height: 42px;
+    border-radius: 11px;
+    object-fit: cover;
+    background: #e6ddd0;
+  }
+  .history-thumb-empty { display: block; background: #efe8dc; }
+  .history-main { display: flex; flex: 1 1 auto; flex-direction: column; gap: 3px; min-width: 0; }
+  .history-when { font-size: 13.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .history-place { font-size: 11.5px; color: var(--muted); }
+  .rating-badge {
+    flex: 0 0 auto;
+    padding: 3px 9px;
+    border: 0;
+    border-radius: 999px;
+    font-size: 11.5px;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+  }
+  .rating-badge.rate-0 { background: #eee7dc; color: #6c6357; }
+  .rating-badge.rate-1 { background: var(--amber-soft); color: #9a6714; }
+  .rating-badge.rate-2 { background: var(--accent-soft); color: var(--accent-ink); }
+  .history-del {
+    flex: 0 0 auto;
+    display: grid;
+    place-items: center;
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    border: 0;
+    border-radius: 9px;
+    background: none;
+    color: #b4a897;
+  }
+  .history-del svg {
+    width: 15px;
+    height: 15px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.9;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  /* ---------- 菜品操作弹层（T5） ---------- */
+  .menu-sheet h2 { margin-bottom: 2px; }
+  .menu-list { display: grid; gap: 8px; margin-top: 16px; }
+  .menu-item {
+    min-height: 48px;
+    padding: 0 16px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: #fff;
+    color: var(--ink);
+    text-align: left;
+    font-size: 15px;
+    font-weight: 600;
+  }
+  .menu-item.danger {
+    border-color: #f2c9bb;
+    background: var(--accent-soft);
+    color: var(--accent-ink);
+  }
+  .menu-item.cancel {
+    border: 0;
+    background: #f2ece2;
+    color: var(--muted);
+    text-align: center;
+    font-weight: 500;
+  }
+  .rating-edit { margin-top: 16px; }
+  .rating-edit .rate { min-height: 46px; font-size: 14px; }
+  .btn-danger { background: var(--accent-ink); color: #fff; box-shadow: 0 10px 24px -12px rgba(156, 47, 16, .85); }
+
+  /* ---------- 吃啥页 ---------- */
+  .pick-actions { margin-top: 18px; }
+  .pick-actions .btn { min-height: 52px; }
+  .pick-actions .lock-hint { text-align: center; }
+  .pick-card { margin-top: 16px; }
+
+  .pick-result {
+    position: relative;
+    margin-top: 16px;
+    padding: 20px 20px 18px;
+    overflow: hidden;
+    border: 1px solid var(--line);
+    border-radius: 22px;
+    background: linear-gradient(180deg, #fffdf9 0%, #fbf5ea 100%);
+    box-shadow: 0 20px 44px -30px rgba(90, 70, 40, .55);
+  }
+  .pick-result::after {
+    content: "";
+    position: absolute;
+    top: -40px;
+    right: -46px;
+    width: 120px;
+    height: 120px;
+    border-radius: 50%;
+    background: var(--accent-soft);
+    opacity: .55;
+    pointer-events: none;
+  }
+  .pick-where {
+    margin: 0 0 6px;
+    font-size: 11.5px;
+    font-weight: 700;
+    letter-spacing: .12em;
+    color: var(--accent-ink);
+  }
+  .pick-dish { margin: 0; font-size: 27px; line-height: 1.25; font-weight: 800; letter-spacing: -.02em; }
+  .pick-reasons { display: grid; gap: 7px; margin: 14px 0 0; padding: 0; list-style: none; }
+  .pick-reasons li {
+    position: relative;
+    padding-left: 16px;
+    font-size: 13px;
+    line-height: 1.55;
+    color: #5f5548;
+  }
+  .pick-reasons li::before {
+    content: "";
+    position: absolute;
+    left: 2px;
+    top: 8px;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--accent);
+    opacity: .55;
+  }
+  .pick-meta {
+    margin: 14px 0 0;
+    padding-top: 12px;
+    border-top: 1px dashed var(--line-strong);
+    font-size: 11.5px;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+  }
+  .pick-actions-row { display: grid; grid-template-columns: 1fr 1.25fr; gap: 10px; margin-top: 14px; }
+  .pick-actions-row .btn { min-height: 46px; border-radius: 14px; font-size: 15px; }
+  .lock-hint {
+    margin: 10px 0 0;
+    font-size: 11.5px;
+    color: var(--muted);
+  }
+  .learning {
+    width: fit-content;
+    max-width: 100%;
+    margin: 22px auto 4px;
+    padding: 9px 14px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: rgba(255, 253, 249, .65);
+    text-align: center;
+    font-size: 11.5px;
+    line-height: 1.7;
+    color: var(--muted);
+  }
+  .learning b { font-weight: 600; color: var(--ink); }
+  .learning .learning-weights { display: block; margin-top: 2px; }
+  .footnote {
+    margin: 16px 4px 0;
+    text-align: center;
+    font-size: 11.5px;
+    line-height: 1.7;
+    color: var(--muted);
+  }
+
+  /* ---------- 底部 tabbar ---------- */
+  .tabbar {
+    position: relative;
+    z-index: 5;
+    flex: 0 0 auto;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 4px;
+    padding: 7px 12px calc(7px + env(safe-area-inset-bottom));
+    border-top: 1px solid rgba(213, 201, 184, .65);
+    background: rgba(255, 253, 249, .93);
+    -webkit-backdrop-filter: blur(18px);
+    backdrop-filter: blur(18px);
+  }
+  .tab {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+    min-height: 46px;
+    padding: 4px 0 2px;
+    border: 0;
+    border-radius: 14px;
+    background: none;
+    color: #7d7467;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: .02em;
+    transition: color .18s ease;
+  }
+  .icon-wrap {
+    display: grid;
+    place-items: center;
+    width: 46px;
+    height: 29px;
+    border-radius: 999px;
+    transition: background .18s ease;
+  }
+  .tab svg {
+    width: 23px;
+    height: 23px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.9;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .tab[aria-selected="true"] { color: var(--accent-ink); }
+  .tab[aria-selected="true"] .icon-wrap { background: var(--accent-soft); }
+
+  /* ---------- toast ---------- */
+  #toast {
+    position: fixed;
+    left: 50%;
+    bottom: calc(78px + env(safe-area-inset-bottom));
+    z-index: 30;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    max-width: calc(100vw - 48px);
+    padding: 10px 18px;
+    border-radius: 18px;
+    background: #2b251e;
+    color: #fff;
+    font-size: 13px;
+    line-height: 1.4;
+    text-align: center;
+    opacity: 0;
+    transform: translate(-50%, 10px);
+    pointer-events: none;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, .18);
+    transition: opacity .18s ease, transform .18s ease;
+  }
+  #toast.show { opacity: 1; transform: translate(-50%, 0); pointer-events: auto; }
+  .toast-action {
+    flex: 0 0 auto;
+    padding: 2px 0;
+    border: 0;
+    background: none;
+    color: #ffb59f;
+    font-size: 13px;
+    font-weight: 700;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+
+  /* ---------- 动效偏好 ---------- */
+  @media (prefers-reduced-motion: reduce) {
+    .screen.is-active { animation: none; }
+    *, *::before, *::after {
+      transition-duration: .01ms !important;
+      animation-duration: .01ms !important;
+    }
+  }
+  /* ================================================================
+     简约风视觉重做（design-taste-frontend）
+     中性色 + 一个深绿强调色；细线、留白、黑白主按钮；去掉插画/渐变/阴影。
+     只覆盖视觉，不改任何功能与数据结构。
+     ================================================================ */
+  :root {
+    --bg: #f7f7f5;
+    --card: #ffffff;
+    --ink: #181817;
+    --muted: #6f6f68;
+    --line: #e5e5df;
+    --line-strong: #d2d2cb;
+    --accent: #1c6b4b;
+    --accent-ink: #14503a;
+    --accent-soft: #eef5f1;
+    --green: #1c6b4b;
+    --green-soft: #eef5f1;
+    --amber: #181817;
+    --amber-soft: #f1f1ec;
+    --shadow-card: none;
+  }
+
+  html, body { background: #ededea; }
+  body { color: var(--ink); }
+  #app { max-width: 430px; background: var(--bg); box-shadow: none; }
+  .screen { padding: 8px 20px 40px; }
+  .screen-head { padding: 18px 2px 4px; }
+  .home-head { padding-top: 22px; }
+  .eyebrow {
+    margin-bottom: 6px;
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: .04em;
+    color: var(--muted);
+  }
+  h1 { font-size: 26px; font-weight: 600; letter-spacing: -.02em; }
+  .home-title {
+    padding: 0;
+    background: none;
+    font-size: 30px;
+    font-weight: 600;
+    letter-spacing: -.03em;
+  }
+  .home-title::after { display: none; }
+  .home-mark { color: var(--accent); }
+  .screen-sub { margin-top: 10px; font-size: 13px; line-height: 1.6; color: var(--muted); }
+  .footnote { font-size: 11px; color: var(--muted); }
+
+  /* 空状态：不要卡片、不要插画 */
+  .empty-card {
+    margin-top: 24px;
+    padding: 30px 8px 32px;
+    border: 0;
+    border-top: 1px solid var(--line);
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+  .empty-art { display: none; }
+  .empty-card h2 { font-size: 17px; font-weight: 600; letter-spacing: -.01em; }
+  .empty-card p { max-width: 19em; margin: 8px auto 22px; font-size: 13px; line-height: 1.65; color: var(--muted); }
+  .empty-card .btn { min-width: 160px; }
+
+  /* 按钮 */
+  .btn { min-height: 50px; border-radius: 10px; font-size: 15px; font-weight: 500; box-shadow: none; }
+  .btn.btn-primary { background: var(--ink); color: #fff; box-shadow: none; }
+  .btn.btn-primary:disabled { background: #ecece7; color: #a0a09a; }
+  .btn.btn-ghost { border: 1px solid var(--line-strong); background: transparent; color: var(--ink); }
+  .btn.btn-danger { background: #a33a2b; color: #fff; box-shadow: none; }
+  .btn:active { transform: scale(.99); }
+
+  /* 主页最近吃过 */
+  .recent { margin-top: 22px; }
+  .recent .field-top { margin-bottom: 8px; }
+  .recent-row { gap: 6px; padding: 2px 0 8px; }
+  .recent-chip {
+    min-width: 104px;
+    padding: 10px 12px;
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    background: transparent;
+    box-shadow: none;
+    transition: border-color .18s ease, transform .18s ease;
+  }
+  .recent-chip .recent-name { font-size: 12.5px; font-weight: 500; }
+  .recent-chip .recent-meta { font-size: 10px; }
+  .recent .add-dish { margin-top: 4px; }
+
+  /* 菜行：平面列表 + 细线 */
+  .draft { margin-top: 18px; }
+  .dish-list { gap: 0; border-top: 1px solid var(--line); }
+  .dish {
+    grid-template-columns: 52px minmax(0, 1fr);
+    gap: 12px;
+    padding: 16px 0;
+    border: 0;
+    border-bottom: 1px solid var(--line);
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+  .thumb {
+    width: 52px;
+    height: 52px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: #f1f1ec;
+    color: var(--muted);
+  }
+  .thumb.has-photo { border-color: var(--line); background: #e6e6e1; }
+  .thumb svg { width: 18px; height: 18px; stroke-width: 1.6; }
+  .thumb-label { font-size: 9px; font-weight: 500; }
+  .thumb img { transition: transform .3s ease; }
+  .thumb-again { right: 3px; bottom: 3px; padding: 1px 4px; border-radius: 4px; background: rgba(24, 24, 23, .65); font-size: 8.5px; }
+  .dish-body { gap: 10px; }
+  .dish-line { gap: 0; }
+  .dish-name {
+    height: 32px;
+    padding: 0 2px;
+    border: 0;
+    border-bottom: 1px solid var(--line);
+    border-radius: 0;
+    background: transparent;
+    font-size: 15px;
+    font-weight: 500;
+  }
+  .dish-name:focus { border-color: var(--ink); background: transparent; }
+  .dish-name::placeholder { color: #77776f; font-size: 13px; font-weight: 400; }
+  .dish-del { position: relative; width: 32px; height: 32px; border-radius: 6px; color: var(--muted); }
+  .dish-del::after { content: ""; position: absolute; inset: -6px; }
+  .rating { gap: 6px; margin-top: 2px; }
+  .rate {
+    min-height: 44px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: transparent;
+    color: var(--muted);
+    font-size: 12.5px;
+    font-weight: 500;
+  }
+  .rate.rate-0[aria-pressed="true"],
+  .rate.rate-1[aria-pressed="true"],
+  .rate.rate-2[aria-pressed="true"] {
+    border-color: var(--ink);
+    background: var(--ink);
+    color: #fff;
+  }
+  .add-dish {
+    min-height: 46px;
+    margin-top: 12px;
+    border: 1px dashed var(--line-strong);
+    border-radius: 11px;
+    background: transparent;
+    color: var(--muted);
+    font-size: 13px;
+    font-weight: 500;
+  }
+  .add-dish:active { background: #f1f1ec; }
+
+  /* 地点 / 表单 */
+  .field { margin-top: 26px; }
+  .field-top { margin-bottom: 10px; }
+  .field-label { font-size: 12px; font-weight: 500; color: var(--muted); }
+  .field-note { font-size: 11px; }
+  .select-wrap select {
+    height: 48px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: #fff;
+    font-size: 14px;
+    font-weight: 500;
+    box-shadow: none;
+  }
+  .select-wrap::after { right: 16px; border-color: var(--muted); }
+  .link-btn {
+    position: relative;
+    padding: 4px 0;
+    color: var(--ink);
+    font-size: 12px;
+    font-weight: 500;
+    text-decoration: underline;
+    text-decoration-color: var(--line-strong);
+    text-underline-offset: 3px;
+  }
+  .link-btn::after { content: ""; position: absolute; inset: -12px -4px; }
+  .sep { color: var(--line-strong); }
+
+  /* 保存 */
+  .save-block { margin-top: 24px; }
+  .save-block.is-docked {
+    margin-top: 16px;
+    padding: 18px 0 10px;
+    border-top: 1px solid var(--line);
+    background: var(--bg);
+    box-shadow: 0 40px 0 0 var(--bg);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  #save-meal { min-height: 52px; border-radius: 11px; font-size: 15px; font-weight: 500; }
+  .save-hint { margin-top: 9px; font-size: 11px; color: var(--muted); }
+
+  /* 联想条 */
+  .photo-suggest,
+  .name-suggest {
+    padding: 9px 10px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: #f1f1ec;
+    color: var(--ink);
+    font-size: 11.5px;
+    font-weight: 500;
+  }
+  .photo-suggest em, .name-suggest em { color: var(--muted); }
+  .suggest-btn { position: relative; min-height: 28px; padding: 4px 10px; border-radius: 6px; font-size: 11.5px; font-weight: 500; }
+  .suggest-btn::after { content: ""; position: absolute; inset: -8px -3px; }
+  .suggest-yes, .suggest-use { background: var(--ink); color: #fff; }
+  .suggest-no { border: 1px solid var(--line); background: #fff; color: var(--muted); }
+  .suggest-actions { gap: 6px; }
+
+  /* 菜库 */
+  .lib-list { margin-top: 20px; border-top: 1px solid var(--line); }
+  .lib-row { border-bottom: 1px solid var(--line); }
+  .lib-open { padding: 16px 0; gap: 12px; }
+  .lib-name { font-size: 15px; font-weight: 500; letter-spacing: -.01em; }
+  .lib-meta { font-size: 11px; }
+  .lib-more { width: 44px; height: 44px; color: var(--muted); font-size: 18px; }
+  .stars { font-size: 11.5px; letter-spacing: 1px; color: #deded8; }
+  .stars-fill { color: var(--ink); }
+  .lib-chev { display: none; }
+
+  /* 菜库详情 */
+  .back-btn {
+    min-height: 44px;
+    margin: 8px 0 0;
+    padding: 10px 2px;
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 500;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+  .detail-head { padding-top: 8px; }
+  .detail-section { margin-top: 26px; }
+  .history-list { margin-top: 8px; border-top: 1px solid var(--line); }
+  .history-row { gap: 12px; padding: 14px 0; border-bottom: 1px solid var(--line); }
+  .history-thumb { width: 40px; height: 40px; border-radius: 7px; background: #f1f1ec; }
+  .history-thumb-empty { display: block; background: #f1f1ec; }
+  .history-when { font-size: 12.5px; font-weight: 500; }
+  .history-place { font-size: 11px; }
+  .rating-badge {
+    position: relative;
+    min-height: 30px;
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 10px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: transparent;
+    color: var(--ink);
+    font-size: 11px;
+    font-weight: 500;
+  }
+  .rating-badge.rate-0, .rating-badge.rate-1, .rating-badge.rate-2 { background: transparent; color: var(--ink); }
+  .rating-badge::after { content: ""; position: absolute; inset: -7px -4px; }
+  .history-del { position: relative; width: 36px; height: 36px; color: var(--muted); }
+  .history-del::after { content: ""; position: absolute; inset: -4px; }
+
+  /* 吃啥 */
+  .pick-actions { margin-top: 22px; }
+  .pick-actions .btn { min-height: 52px; border-radius: 11px; }
+  .pick-actions .lock-hint { margin-top: 9px; font-size: 11px; }
+  .pick-card { padding: 30px 8px 28px; }
+  .pick-result {
+    margin-top: 20px;
+    padding: 24px 0;
+    border: 0;
+    border-top: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+  .pick-result::after { display: none; }
+  .pick-where { margin-bottom: 8px; font-size: 10.5px; font-weight: 500; letter-spacing: .08em; color: var(--muted); }
+  .pick-dish { font-size: 30px; font-weight: 600; letter-spacing: -.025em; }
+  .pick-reasons { gap: 6px; margin-top: 16px; }
+  .pick-reasons li { padding-left: 13px; font-size: 12.5px; color: var(--muted); }
+  .pick-reasons li::before { top: 8px; width: 4px; height: 4px; background: var(--accent); opacity: 1; }
+  .pick-meta { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--line); font-size: 11px; }
+  .pick-actions-row { gap: 8px; margin-top: 16px; }
+  .pick-actions-row .btn { min-height: 48px; border-radius: 10px; font-size: 14px; }
+  .learning {
+    width: 100%;
+    margin: 24px 0 0;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    font-size: 11px;
+    line-height: 1.7;
+    color: var(--muted);
+  }
+
+  /* 地点多选条 */
+  .places { gap: 6px; }
+  .chip {
+    min-height: 44px;
+    padding: 8px 12px 8px 10px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: transparent;
+    color: var(--ink);
+    font-size: 12.5px;
+    font-weight: 500;
+  }
+  .chip .box { width: 15px; height: 15px; border-radius: 4px; border-color: var(--line-strong); background: #fff; }
+  .chip .walk { font-size: 10.5px; }
+  .chip[aria-pressed="true"] { border-color: var(--ink); background: #fff; color: var(--ink); }
+  .chip[aria-pressed="true"] .box { border-color: var(--ink); background: var(--ink); }
+  .chip[aria-pressed="true"] .box svg { stroke: #fff; }
+  .chip[aria-pressed="true"] .walk { color: var(--muted); }
+
+  /* tabbar */
+  .tabbar {
+    padding: 7px 10px calc(6px + env(safe-area-inset-bottom));
+    border-top: 1px solid var(--line);
+    background: rgba(255, 255, 255, .94);
+    -webkit-backdrop-filter: blur(14px);
+    backdrop-filter: blur(14px);
+  }
+  .tab {
+    position: relative;
+    min-height: 48px;
+    border-radius: 0;
+    color: var(--muted);
+    font-size: 10.5px;
+    font-weight: 500;
+  }
+  .tab[aria-selected="true"] { color: var(--ink); font-weight: 600; }
+  .tab[aria-selected="true"] .icon-wrap { background: transparent; }
+  .tab[aria-selected="true"]::before {
+    content: "";
+    position: absolute;
+    top: -1px;
+    left: 50%;
+    width: 18px;
+    height: 2px;
+    background: var(--ink);
+    transform: translateX(-50%);
+  }
+  .icon-wrap { width: 44px; height: 26px; }
+  .tab svg { width: 21px; height: 21px; stroke-width: 1.7; }
+
+  /* 弹层 */
+  dialog.sheet {
+    padding: 24px 20px 20px;
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    background: #fff;
+    box-shadow: 0 30px 80px -40px rgba(0, 0, 0, .4);
+  }
+  dialog.sheet::backdrop { background: rgba(24, 24, 23, .32); }
+  dialog.sheet h2 { font-size: 18px; font-weight: 600; }
+  .sheet-sub { font-size: 12px; line-height: 1.6; }
+  .sheet-field { font-size: 11px; font-weight: 500; }
+  .sheet-field input, .sheet-field select {
+    height: 46px;
+    border-radius: 9px;
+    font-size: 14px;
+    font-weight: 500;
+  }
+  .sheet-field input:focus, .sheet-field select:focus { border-color: var(--ink); }
+  .sheet-field select {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.5 6 8l3.5-3.5' fill='none' stroke='%236f6f68' stroke-width='1.4'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+  }
+  .sheet-actions { gap: 8px; margin-top: 22px; }
+  .sheet-actions .btn { min-height: 48px; border-radius: 9px; font-size: 14px; font-weight: 500; }
+  .menu-list { gap: 0; margin-top: 18px; border-top: 1px solid var(--line); }
+  .menu-item {
+    min-height: 52px;
+    padding: 0 2px;
+    border: 0;
+    border-bottom: 1px solid var(--line);
+    border-radius: 0;
+    background: transparent;
+    font-size: 14px;
+    font-weight: 500;
+  }
+  .menu-item.danger { background: transparent; color: #a33a2b; }
+  .menu-item.cancel { margin-top: 12px; border: 1px solid var(--line); border-radius: 9px; background: transparent; color: var(--muted); text-align: center; }
+  .rating-edit .rate { min-height: 48px; font-size: 13px; }
+
+  /* toast */
+  #toast {
+    padding: 11px 16px;
+    border-radius: 10px;
+    background: var(--ink);
+    font-size: 12.5px;
+    box-shadow: none;
+  }
+  .toast-action { color: #b9d9c8; font-size: 12.5px; font-weight: 500; }
+
+  /* 焦点 / 动效 */
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  @keyframes rise-in {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: none; }
+  }
+  .home-head > * { animation: rise-in .45s cubic-bezier(.2, .7, .3, 1) both; }
+  .home-head > *:nth-child(2) { animation-delay: .05s; }
+  .home-head > *:nth-child(3) { animation-delay: .1s; }
+  @media (hover: hover) {
+    .btn:not(:disabled):hover { transform: translateY(-1px); }
+    .recent-chip:hover { border-color: var(--ink); }
+    .lib-row:hover .lib-name { color: var(--accent); }
+    .dish:hover .thumb img { transform: scale(1.03); }
+    .menu-item:hover { color: var(--accent); }
+    .link-btn:hover { color: var(--accent); }
+    .tab:hover { color: var(--ink); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .home-head > * { animation: none; }
+    .thumb img, .btn, .recent-chip { transition: none; }
+  }
+</style>
+</head>
+<body>
+
+<div id="app">
+  <main id="main">
+
+    <!-- ============ 屏 1 · 记录 ============ -->
+    <section class="screen is-active" id="screen-add" role="tabpanel" aria-labelledby="tab-add">
+      <header class="screen-head home-head">
+        <p class="eyebrow" id="today-label">今天</p>
+        <h1 class="home-title">今天吃啥<span class="home-mark" aria-hidden="true">。</span></h1>
+        <p class="screen-sub" id="home-sub">记下这一餐吃了什么，打一个分。</p>
+      </header>
+
+      <div class="recent" id="recent-strip" hidden>
+        <div class="field-top">
+          <span class="field-label">最近吃过</span>
+          <span class="field-note">点一下，再记一次</span>
+        </div>
+        <div class="recent-row" id="recent-list"></div>
+        <button type="button" class="add-dish" id="add-new-dish">＋ 记一道新的</button>
+      </div>
+
+      <div class="empty-card" id="add-empty">
+        <svg class="empty-art" viewBox="0 0 96 96" role="img" aria-label="一只空碗">
+          <circle cx="48" cy="50" r="36" fill="var(--accent-soft)"/>
+          <path d="M23 49.5h50c0 15-11.2 26-25 26s-25-11-25-26Z"
+                fill="var(--card)" stroke="var(--accent)" stroke-width="2.8" stroke-linejoin="round"/>
+          <path d="M18.5 49.5h59" stroke="var(--accent)" stroke-width="2.8" stroke-linecap="round"/>
+          <path d="M38.5 41c0-4 3.5-4.3 3.5-8.3M54 41c0-4 3.5-4.3 3.5-8.3"
+                fill="none" stroke="#eda28c" stroke-width="2.8" stroke-linecap="round"/>
+          <path d="M34.5 60.5c4.3 4.2 8.8 6.2 13.5 6.2"
+                fill="none" stroke="#f4c1b2" stroke-width="2.6" stroke-linecap="round"/>
+          <circle cx="73" cy="29" r="10.5" fill="var(--accent)"/>
+          <path d="M73 24.5v9M68.5 29h9" stroke="#fff" stroke-width="2.6" stroke-linecap="round"/>
+        </svg>
+        <h2>这一餐还空着</h2>
+        <p>拍张照或写个菜名，选个评分就记下了。</p>
+        <button type="button" class="btn btn-primary btn-auto" id="add-first">＋ 加一道菜</button>
+      </div>
+
+      <div class="draft" id="draft-wrap" hidden>
+        <ol class="dish-list" id="draft-list"></ol>
+        <button type="button" class="add-dish" id="add-dish">＋ 再加一道菜</button>
+      </div>
+
+      <div class="field">
+        <div class="field-top">
+          <span class="field-label">在哪吃</span>
+          <span class="field-links">
+            <button type="button" class="link-btn" id="manage-place">管理</button>
+            <button type="button" class="link-btn" id="add-place">＋ 新增地点</button>
+          </span>
+        </div>
+        <div class="select-wrap">
+          <label class="sr-only" for="meal-place">在哪吃</label>
+          <select id="meal-place"></select>
+        </div>
+      </div>
+
+      <div class="save-block" id="save-block">
+        <button type="button" class="btn btn-primary" id="save-meal" disabled>保存这一餐</button>
+        <p class="save-hint" id="save-hint">先加一道菜，就能保存了</p>
+      </div>
+    </section>
+
+    <!-- ============ 屏 2 · 菜库 ============ -->
+    <section class="screen" id="screen-lib" role="tabpanel" aria-labelledby="tab-lib" aria-hidden="true">
+      <div id="lib-overview">
+        <header class="screen-head">
+          <p class="eyebrow">菜库</p>
+          <h1>我吃过 <span class="num" id="lib-count">0</span> 道菜</h1>
+          <p class="screen-sub">每道菜吃了几次、平均几分、多久没吃，都会自动累计。</p>
+        </header>
+
+        <div class="empty-card" id="lib-empty">
+          <svg class="empty-art" viewBox="0 0 96 96" role="img" aria-label="空的菜库">
+            <circle cx="48" cy="50" r="36" fill="var(--green-soft)"/>
+            <rect x="34" y="31" width="33" height="41" rx="7" fill="var(--card)"
+                  stroke="#7fae91" stroke-width="2.6" transform="rotate(6 50.5 51.5)"/>
+            <rect x="28" y="24" width="33" height="41" rx="7" fill="var(--card)"
+                  stroke="var(--green)" stroke-width="2.8"/>
+            <path d="M36 34.5h17M36 42h17M36 49.5h10" stroke="#a7c7b4"
+                  stroke-width="2.8" stroke-linecap="round"/>
+            <path d="M67 69c4.5 0 7.5-3 8-7" fill="none" stroke="var(--green)"
+                  stroke-width="2.6" stroke-linecap="round" opacity=".5"/>
+          </svg>
+          <h2>还没有一道菜</h2>
+          <p>记录第一餐后，菜会收进这里，次数和平均分自动累计。</p>
+          <button type="button" class="btn btn-primary btn-auto" data-tab="add">去记录第一餐</button>
+        </div>
+
+        <ol class="lib-list" id="lib-list" hidden></ol>
+        <p class="footnote" id="lib-foot" hidden>按推荐分排序：口味、多久没吃、距离和探索一起算。</p>
+      </div>
+
+      <div id="lib-detail" hidden>
+        <button type="button" class="back-btn" data-lib-back>‹ 全部菜</button>
+        <header class="screen-head detail-head">
+          <p class="eyebrow">这道菜</p>
+          <h1 id="lib-detail-name">—</h1>
+          <p class="screen-sub" id="lib-detail-sum">—</p>
+        </header>
+        <div class="field-top detail-section">
+          <span class="field-label">吃过这些次</span>
+          <span class="field-note" id="lib-history-count"></span>
+        </div>
+        <ol class="history-list" id="lib-history"></ol>
+      </div>
+    </section>
+
+    <!-- ============ 屏 3 · 吃啥 ============ -->
+    <section class="screen" id="screen-pick" role="tabpanel" aria-labelledby="tab-pick" aria-hidden="true">
+      <header class="screen-head">
+        <p class="eyebrow">今天去哪吃</p>
+        <h1>选个地点，我来挑</h1>
+        <p class="screen-sub">勾选今天能去的地方，我从你吃过的菜里挑一道。</p>
+      </header>
+
+      <div class="field">
+        <div class="field-top">
+          <span class="field-label">今天能去哪？<em class="field-note">可多选</em></span>
+          <span class="field-actions">
+            <button type="button" class="link-btn" data-places="all">全选</button>
+            <span class="sep" aria-hidden="true">/</span>
+            <button type="button" class="link-btn" data-places="none">清空</button>
+          </span>
+        </div>
+        <div class="places" id="place-chips"></div>
+      </div>
+
+      <div class="pick-actions">
+        <button type="button" class="btn btn-primary" id="pick-btn" disabled>帮我选一道</button>
+        <p class="lock-hint" id="pick-hint">菜库还空着 · 先记一餐</p>
+      </div>
+
+      <div class="empty-card pick-card" id="pick-empty">
+        <svg class="empty-art" viewBox="0 0 96 96" role="img" aria-label="一颗骰子">
+          <circle cx="48" cy="50" r="36" fill="var(--amber-soft)"/>
+          <rect x="30" y="31" width="38" height="38" rx="10" fill="var(--card)"
+                stroke="var(--amber)" stroke-width="2.8" transform="rotate(-7 49 50)"/>
+          <g fill="var(--amber)">
+            <circle cx="41" cy="42" r="2.7"/><circle cx="56" cy="42" r="2.7"/>
+            <circle cx="48.5" cy="50" r="2.7"/>
+            <circle cx="41" cy="58" r="2.7"/><circle cx="56" cy="58" r="2.7"/>
+          </g>
+          <path d="M73 21l1.9 5.3 5.3 1.9-5.3 1.9L73 35.4l-1.9-5.3-5.3-1.9 5.3-1.9L73 21Z"
+                fill="var(--amber)" opacity=".6"/>
+          <circle cx="24" cy="63" r="2.6" fill="var(--amber)" opacity=".4"/>
+        </svg>
+        <h2 id="pick-empty-title">还选不出来</h2>
+        <p id="pick-empty-text">先记几餐，我才有得挑。菜越多，推荐越像你的口味。</p>
+      </div>
+
+      <div class="pick-result" id="pick-result" hidden>
+        <p class="pick-where" id="pick-where"></p>
+        <h2 class="pick-dish" id="pick-dish"></h2>
+        <ul class="pick-reasons" id="pick-reasons"></ul>
+        <p class="pick-meta" id="pick-meta"></p>
+        <div class="pick-actions-row">
+          <button type="button" class="btn btn-ghost" id="pick-again">换一个</button>
+          <button type="button" class="btn btn-primary" id="pick-accept">就吃这个</button>
+        </div>
+      </div>
+
+      <p class="learning" id="learning">
+        已从 <b id="fb-count">0</b> 次选择中学习 ·
+        口味 <b id="w-q">45%</b> · 多久没吃 <b id="w-f">30%</b> · 距离 <b id="w-d">25%</b>
+      </p>
+    </section>
+
+  </main>
+
+  <!-- ============ 底部 tabbar ============ -->
+  <nav class="tabbar" role="tablist" aria-label="主要页面">
+    <button type="button" class="tab" role="tab" id="tab-add"
+            data-tab="add" aria-controls="screen-add" aria-selected="true" tabindex="0">
+      <span class="icon-wrap">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <rect x="3.5" y="3.5" width="17" height="17" rx="5"/>
+          <path d="M12 8.2v7.6M8.2 12h7.6"/>
+        </svg>
+      </span>
+      <span>记录</span>
+    </button>
+    <button type="button" class="tab" role="tab" id="tab-lib"
+            data-tab="lib" aria-controls="screen-lib" aria-selected="false" tabindex="-1">
+      <span class="icon-wrap">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <rect x="5" y="3.5" width="14" height="17" rx="3.5"/>
+          <path d="M8.8 8.3h6.4M8.8 12h6.4M8.8 15.7h3.6"/>
+        </svg>
+      </span>
+      <span>菜库</span>
+    </button>
+    <button type="button" class="tab" role="tab" id="tab-pick"
+            data-tab="pick" aria-controls="screen-pick" aria-selected="false" tabindex="-1">
+      <span class="icon-wrap">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <rect x="3.7" y="3.7" width="16.6" height="16.6" rx="4.5"/>
+          <circle cx="8.4" cy="8.4" r="1.1" fill="currentColor" stroke="none"/>
+          <circle cx="15.6" cy="8.4" r="1.1" fill="currentColor" stroke="none"/>
+          <circle cx="12" cy="12" r="1.1" fill="currentColor" stroke="none"/>
+          <circle cx="8.4" cy="15.6" r="1.1" fill="currentColor" stroke="none"/>
+          <circle cx="15.6" cy="15.6" r="1.1" fill="currentColor" stroke="none"/>
+        </svg>
+      </span>
+      <span>吃啥</span>
+    </button>
+  </nav>
+</div>
+
+<input type="file" id="photo-input" accept="image/*" hidden>
+
+<div class="photo-view" id="photo-view" hidden>
+  <button type="button" class="photo-view-close" id="photo-view-close" aria-label="关闭">×</button>
+  <img id="photo-view-img" alt="">
+  <p class="photo-view-meta" id="photo-view-meta"></p>
+</div>
+
+<dialog class="sheet" id="place-dialog">
+  <form id="place-form" novalidate>
+    <h2 id="place-title">新增地点</h2>
+    <p class="sheet-sub">加一个你常去的地方。推荐时按步行分钟数算距离，越近越优先。</p>
+    <div class="sheet-row">
+      <label class="sheet-field" for="place-name">叫什么
+        <input id="place-name" type="text" maxlength="12" placeholder="如 五食堂" autocomplete="off">
+      </label>
+      <label class="sheet-field" for="place-walk">步行（分钟）
+        <input id="place-walk" type="number" min="0" max="60" step="1" value="10" inputmode="numeric">
+      </label>
+    </div>
+    <p class="sheet-hint" id="place-error" hidden></p>
+    <div class="sheet-actions">
+      <button type="button" class="btn btn-ghost" id="place-cancel">取消</button>
+      <button type="submit" class="btn btn-primary" id="place-submit">存下</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog class="sheet" id="place-manage-dialog">
+  <h2>地点</h2>
+  <p class="sheet-sub">改名、改步行分钟，或删掉不去的。已经在用的地点不能删。</p>
+  <div class="place-list" id="place-list"></div>
+  <div class="sheet-actions">
+    <button type="button" class="btn btn-ghost" id="place-manage-close">关闭</button>
+  </div>
+</dialog>
+
+<dialog class="sheet menu-sheet" id="dish-menu">
+  <h2 id="dish-menu-title">这道菜</h2>
+  <p class="sheet-sub" id="dish-menu-sub"></p>
+  <div class="menu-list">
+    <button type="button" class="menu-item" data-dish-action="rename">改菜名</button>
+    <button type="button" class="menu-item" data-dish-action="merge">合并到别的菜</button>
+    <button type="button" class="menu-item danger" data-dish-action="delete">删除这道菜</button>
+    <button type="button" class="menu-item cancel" data-dish-action="close">取消</button>
+  </div>
+</dialog>
+
+<dialog class="sheet" id="rename-dialog">
+  <form id="rename-form" novalidate>
+    <h2>改菜名</h2>
+    <p class="sheet-sub">历史记录会一起改名；旧名字留作别名，下次输入还能认出来。</p>
+    <label class="sheet-field" for="rename-input">新菜名
+      <input id="rename-input" type="text" maxlength="30" autocomplete="off">
+    </label>
+    <p class="sheet-hint" id="rename-error" hidden></p>
+    <div class="sheet-actions">
+      <button type="button" class="btn btn-ghost" id="rename-cancel">取消</button>
+      <button type="submit" class="btn btn-primary">改名</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog class="sheet" id="merge-dialog">
+  <form id="merge-form" novalidate>
+    <h2>合并这两道菜</h2>
+    <p class="sheet-sub" id="merge-sub">把这道菜的记录并到另一道菜里，次数相加。</p>
+    <label class="sheet-field" for="merge-select">合并到
+      <select id="merge-select"></select>
+    </label>
+    <p class="sheet-hint" id="merge-error" hidden></p>
+    <div class="sheet-actions">
+      <button type="button" class="btn btn-ghost" id="merge-cancel">取消</button>
+      <button type="submit" class="btn btn-danger">合并</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog class="sheet" id="confirm-dialog">
+  <h2 id="confirm-title">删除？</h2>
+  <p class="sheet-sub" id="confirm-text"></p>
+  <div class="sheet-actions">
+    <button type="button" class="btn btn-ghost" id="confirm-cancel">取消</button>
+    <button type="button" class="btn btn-danger" id="confirm-ok">删除</button>
+  </div>
+</dialog>
+
+<dialog class="sheet" id="rating-dialog">
+  <h2>改评分</h2>
+  <p class="sheet-sub" id="rating-sub"></p>
+  <div class="rating rating-edit" role="group" aria-label="改成哪一档">
+    <button type="button" class="rate rate-0" data-pick-rating="0">难吃</button>
+    <button type="button" class="rate rate-1" data-pick-rating="1">一般</button>
+    <button type="button" class="rate rate-2" data-pick-rating="2">好吃</button>
+  </div>
+  <div class="sheet-actions single">
+    <button type="button" class="btn btn-ghost" id="rating-cancel">取消</button>
+  </div>
+</dialog>
+
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script>
+(function () {
+  'use strict';
+
+  /* ================= 状态（T2 起由 IndexedDB 填充） ================= */
+  var DEFAULT_PLACES = [
+    { id: 'p1', name: '一食堂', walkMin: 5 },
+    { id: 'p2', name: '二食堂', walkMin: 8 },
+    { id: 'p3', name: '三食堂', walkMin: 10 },
+    { id: 'p4', name: '外卖', walkMin: 1 }
+  ];
+  var DEFAULT_PLACE_ORDER = DEFAULT_PLACES.map(function (p) { return p.id; });
+  var DEFAULT_WEIGHTS = { q: 0.45, f: 0.30, d: 0.25 };
+  var LAST_PLACE_KEY = 'eatwhat.lastPlace';
+  var PHOTO_MAX_EDGE = 1024;   // 长边压到 1024
+  var PHOTO_QUALITY = 0.8;     // JPEG 0.8
+  var PHOTO_MATCH_THRESHOLD = 0.80; // 图像联想阈值（dHash + 颜色直方图 各占一半）
+  var NAME_MATCH_THRESHOLD = 0.75;  // 菜名联想阈值
+  var RATING_WORDS = ['难吃', '一般', '好吃'];
+  var RATING_SCORES = [1, 3, 5];
+  var QUALITY_C = 2;          // 贝叶斯平滑 C=2
+  var QUALITY_PRIOR = 3.0;    // 先验 3.0
+  var FRESH_DAYS = 14;        // 多久没吃：14 天封顶（越久没吃分越高）
+  var EXPLORE_RATIO = 0.10;   // UCB 探索占比
+  var WALK_SCALE = 10;        // 距离因子分母的 10 分钟
+  var MIN_FEEDBACK = 15;      // 学习触发条数
+  var LEARNING_RATE = 0.5;    // 逻辑回归学习率
+  var TRAIN_EPOCHS = 400;     // 梯度下降轮数
+  var WEIGHT_MIN = 0.05;      // 权重下限
+  var WEIGHT_MAX = 0.70;      // 权重上限
+
+  var SCREENS = ['add', 'lib', 'pick'];
+  var TITLES = { add: '记录', lib: '菜库', pick: '吃啥' };
+
+  var state = {
+    screen: 'add',
+    places: DEFAULT_PLACES,
+    selectedPlaces: new Set(DEFAULT_PLACES.map(function (p) { return p.id; })),
+    draftPlaceId: DEFAULT_PLACES[0].id,
+    draftItems: [],   // T3：本餐已加的菜
+    dishes: [],       // T2：菜库
+    meals: [],        // T2：历史记录
+    feedback: [],     // T10：接受 / 换掉
+    weights: Object.assign({}, DEFAULT_WEIGHTS),
+    libDishId: null,  // 菜库详情正在看的菜
+    libStats: [],
+    menuDishId: null,   // T5：菜品操作弹层对应的菜
+    renameDishId: null,
+    mergeSourceId: null,
+    ratingTarget: null, // T5：{ mealId, dishId }
+    confirmAction: null,
+    currentPick: null,  // T9：当前推荐结果
+    pickShown: [],      // T9：本轮已经给过的菜，换一个时排除
+    learned: false,     // T10：权重是否已从反馈学出来
+    ready: false,     // IndexedDB 是否已读完
+    storageError: ''  // 存储不可用时记下原因，界面照常可看
+  };
+
+  var $ = function (sel, root) { return (root || document).querySelector(sel); };
+  var $$ = function (sel, root) { return Array.prototype.slice.call((root || document).querySelectorAll(sel)); };
+
+  /* ================= IndexedDB（T2） =================
+     库 eatwhat / 版本 1；四张表 dishes meals places feedback，主键均为 id。
+     只在读写完成或失败时 resolve / reject，调用方不用关心事务细节。 */
+  var DB_NAME = 'eatwhat';
+  var DB_VERSION = 1;
+  var DB_STORES = ['dishes', 'meals', 'places', 'feedback'];
+  var dbPromise = null;
+
+  function openDB() {
+    if (dbPromise) return dbPromise;
+    dbPromise = new Promise(function (resolve, reject) {
+      if (!window.indexedDB) { reject(new Error('这个浏览器不支持 IndexedDB')); return; }
+      var req;
+      try {
+        req = indexedDB.open(DB_NAME, DB_VERSION);
+      } catch (err) {
+        reject(err);
+        return;
+      }
+      req.onupgradeneeded = function () {
+        var db = req.result;
+        DB_STORES.forEach(function (name) {
+          if (!db.objectStoreNames.contains(name)) db.createObjectStore(name, { keyPath: 'id' });
+        });
+      };
+      req.onsuccess = function () { resolve(req.result); };
+      req.onerror = function () { reject(req.error || new Error('打不开本地数据库')); };
+      req.onblocked = function () { /* 另一个标签页占用旧版本，等它关闭即可 */ };
+    });
+    return dbPromise;
+  }
+
+  function withStore(name, mode, task) {
+    return openDB().then(function (db) {
+      return new Promise(function (resolve, reject) {
+        var tx = db.transaction(name, mode);
+        var store = tx.objectStore(name);
+        var request;
+        try {
+          request = task(store);
+        } catch (err) {
+          reject(err);
+          return;
+        }
+        tx.oncomplete = function () { resolve(request ? request.result : undefined); };
+        tx.onerror = function () { reject(tx.error || (request && request.error) || new Error('读写失败')); };
+        tx.onabort = function () { reject(tx.error || new Error('读写被中止')); };
+      });
+    });
+  }
+
+  function dbAll(name) {
+    return withStore(name, 'readonly', function (store) { return store.getAll(); });
+  }
+
+  function dbPut(name, value) {
+    return withStore(name, 'readwrite', function (store) { return store.put(value); });
+  }
+
+  function dbDel(name, id) {
+    return withStore(name, 'readwrite', function (store) { return store.delete(id); });
+  }
+
+  function dbBulkPut(name, values) {
+    return withStore(name, 'readwrite', function (store) {
+      values.forEach(function (value) { store.put(value); });
+      return null;
+    });
+  }
+
+  /* 启动时把四张表读进内存；places 首次为空则写入默认地点。 */
+  function loadAll() {
+    return Promise.all([
+      dbAll('dishes'), dbAll('meals'), dbAll('places'), dbAll('feedback')
+    ]).then(function (rows) {
+      state.dishes = rows[0];
+      state.meals = rows[1];
+      state.feedback = rows[3];
+      applyLearnedWeights();
+      if (rows[2].length) return rows[2];
+      return dbBulkPut('places', DEFAULT_PLACES).then(function () { return DEFAULT_PLACES.slice(); });
+    }).then(function (places) {
+      places = orderPlaces(places);
+      state.places = places;
+      state.selectedPlaces = new Set(places.map(function (p) { return p.id; }));
+      var lastPlace = readLastPlace();
+      var hasLast = places.some(function (p) { return p.id === lastPlace; });
+      state.draftPlaceId = hasLast ? lastPlace : ((places[0] && places[0].id) || '');
+      state.ready = true;
+    }).catch(function (err) {
+      state.ready = false;
+      state.storageError = (err && err.message) || String(err);
+      console.error('IndexedDB 初始化失败', err);
+    });
+  }
+
+  /* ================= 小工具 ================= */
+  function newId() {
+    return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+  }
+
+  function cleanName(value) {
+    return String(value || '').replace(/\s+/g, ' ').trim();
+  }
+
+  function escapeHtml(value) {
+    return String(value).replace(/[&<>"']/g, function (ch) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch];
+    });
+  }
+
+  function findDishByName(name) {
+    var key = name.toLowerCase();
+    for (var i = 0; i < state.dishes.length; i++) {
+      var dish = state.dishes[i];
+      if (dish.name.toLowerCase() === key) return dish;
+      var aliases = dish.aliases || [];
+      for (var j = 0; j < aliases.length; j++) {
+        if (String(aliases[j]).toLowerCase() === key) return dish;
+      }
+    }
+    return null;
+  }
+
+  function placeName(id) {
+    var place = state.places.filter(function (p) { return p.id === id; })[0];
+    return place ? place.name : '';
+  }
+
+  function dishById(id) {
+    for (var i = 0; i < state.dishes.length; i++) {
+      if (state.dishes[i].id === id) return state.dishes[i];
+    }
+    return null;
+  }
+
+  function mealsWithDish(dishId) {
+    return state.meals.filter(function (meal) {
+      return (meal.items || []).some(function (item) { return item.dishId === dishId; });
+    });
+  }
+
+  function showDialog(dialog) {
+    if (dialog.open) return;
+    if (typeof dialog.showModal === 'function') dialog.showModal();
+    else dialog.setAttribute('open', '');
+  }
+
+  function closeDialog(dialog) {
+    if (!dialog.open) return;
+    if (typeof dialog.close === 'function') dialog.close();
+    else dialog.removeAttribute('open');
+  }
+
+  function showSheetError(el, message) {
+    el.textContent = message;
+    el.hidden = false;
+  }
+
+  /* getAll 按主键排序，新地点会跑到普通 id 前面；这里固定成「默认在前，新地点在后」。 */
+  function orderPlaces(places) {
+    return places.slice().sort(function (a, b) {
+      var ai = DEFAULT_PLACE_ORDER.indexOf(a.id);
+      var bi = DEFAULT_PLACE_ORDER.indexOf(b.id);
+      if (ai !== -1 || bi !== -1) {
+        if (ai === -1) return 1;
+        if (bi === -1) return -1;
+        return ai - bi;
+      }
+      return String(a.id).localeCompare(String(b.id));
+    });
+  }
+
+  function readLastPlace() {
+    try { return localStorage.getItem(LAST_PLACE_KEY) || ''; } catch (err) { return ''; }
+  }
+
+  function rememberPlace(id) {
+    if (!id) return;
+    try { localStorage.setItem(LAST_PLACE_KEY, id); } catch (err) { /* 隐私模式忽略 */ }
+  }
+
+  var els = {
+    screens: {
+      add: $('#screen-add'),
+      lib: $('#screen-lib'),
+      pick: $('#screen-pick')
+    },
+    tabs: {
+      add: $('#tab-add'),
+      lib: $('#tab-lib'),
+      pick: $('#tab-pick')
+    },
+    date: $('#today-label'),
+    placeSelect: $('#meal-place'),
+    placeChips: $('#place-chips'),
+    addEmpty: $('#add-empty'),
+    recentStrip: $('#recent-strip'),
+    recentList: $('#recent-list'),
+    homeSub: $('#home-sub'),
+    saveBlock: $('#save-block'),
+    draftWrap: $('#draft-wrap'),
+    draftList: $('#draft-list'),
+    addFirst: $('#add-first'),
+    addDish: $('#add-dish'),
+    addPlace: $('#add-place'),
+    managePlace: $('#manage-place'),
+    placeManageDialog: $('#place-manage-dialog'),
+    placeList: $('#place-list'),
+    placeManageClose: $('#place-manage-close'),
+    photoInput: $('#photo-input'),
+    photoView: $('#photo-view'),
+    photoViewImg: $('#photo-view-img'),
+    photoViewMeta: $('#photo-view-meta'),
+    placeDialog: $('#place-dialog'),
+    placeForm: $('#place-form'),
+    placeTitle: $('#place-title'),
+    placeSubmit: $('#place-submit'),
+    placeName: $('#place-name'),
+    placeWalk: $('#place-walk'),
+    placeError: $('#place-error'),
+    placeCancel: $('#place-cancel'),
+    dishMenu: $('#dish-menu'),
+    dishMenuTitle: $('#dish-menu-title'),
+    dishMenuSub: $('#dish-menu-sub'),
+    renameDialog: $('#rename-dialog'),
+    renameForm: $('#rename-form'),
+    renameInput: $('#rename-input'),
+    renameError: $('#rename-error'),
+    renameCancel: $('#rename-cancel'),
+    mergeDialog: $('#merge-dialog'),
+    mergeForm: $('#merge-form'),
+    mergeSub: $('#merge-sub'),
+    mergeSelect: $('#merge-select'),
+    mergeError: $('#merge-error'),
+    mergeCancel: $('#merge-cancel'),
+    confirmDialog: $('#confirm-dialog'),
+    confirmTitle: $('#confirm-title'),
+    confirmText: $('#confirm-text'),
+    confirmOk: $('#confirm-ok'),
+    confirmCancel: $('#confirm-cancel'),
+    ratingDialog: $('#rating-dialog'),
+    ratingSub: $('#rating-sub'),
+    ratingCancel: $('#rating-cancel'),
+    saveMeal: $('#save-meal'),
+    saveHint: $('#save-hint'),
+    libCount: $('#lib-count'),
+    libOverview: $('#lib-overview'),
+    libEmpty: $('#lib-empty'),
+    libList: $('#lib-list'),
+    libFoot: $('#lib-foot'),
+    libDetail: $('#lib-detail'),
+    libDetailName: $('#lib-detail-name'),
+    libDetailSum: $('#lib-detail-sum'),
+    libHistory: $('#lib-history'),
+    libHistoryCount: $('#lib-history-count'),
+    pickBtn: $('#pick-btn'),
+    pickHint: $('#pick-hint'),
+    pickEmpty: $('#pick-empty'),
+    pickEmptyTitle: $('#pick-empty-title'),
+    pickEmptyText: $('#pick-empty-text'),
+    pickResult: $('#pick-result'),
+    pickWhere: $('#pick-where'),
+    pickDish: $('#pick-dish'),
+    pickReasons: $('#pick-reasons'),
+    pickMeta: $('#pick-meta'),
+    pickAgain: $('#pick-again'),
+    pickAccept: $('#pick-accept'),
+    learning: $('#learning'),
+    fbCount: $('#fb-count'),
+    wq: $('#w-q'),
+    wf: $('#w-f'),
+    wd: $('#w-d'),
+    toast: $('#toast')
+  };
+
+  /* ================= 渲染 ================= */
+  function greetingNow() {
+    var hour = new Date().getHours();
+    if (hour < 5) return '夜深了';
+    if (hour < 10) return '早上好';
+    if (hour < 14) return '中午好';
+    if (hour < 18) return '下午好';
+    return '晚上好';
+  }
+
+  function setDateLabel() {
+    var now = new Date();
+    var week = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][now.getDay()];
+    els.date.textContent = greetingNow() + ' · ' + (now.getMonth() + 1) + '月' +
+      now.getDate() + '日 ' + week;
+  }
+
+  function buildPlaceSelect() {
+    els.placeSelect.innerHTML = state.places.length
+      ? state.places.map(function (p) {
+          return '<option value="' + p.id + '">' + p.name + ' · ' + p.walkMin + ' 分钟</option>';
+        }).join('')
+      : '<option value="">还没有地点</option>';
+    els.placeSelect.value = state.draftPlaceId;
+  }
+
+  function buildPlaceChips() {
+    els.placeChips.innerHTML = state.places.map(function (p) {
+      var pressed = state.selectedPlaces.has(p.id) ? 'true' : 'false';
+      return '<button type="button" class="chip" data-place="' + p.id + '" aria-pressed="' + pressed + '">' +
+        '<span class="box" aria-hidden="true">' +
+          '<svg viewBox="0 0 12 12"><path d="M2.4 6.3 5 8.8l4.7-5.2"/></svg>' +
+        '</span>' +
+        '<span class="chip-name">' + p.name + '</span>' +
+        '<span class="walk">' + p.walkMin + ' 分钟</span>' +
+      '</button>';
+    }).join('');
+  }
+
+  function syncChips() {
+    $$('#place-chips .chip').forEach(function (chip) {
+      chip.setAttribute('aria-pressed',
+        state.selectedPlaces.has(chip.getAttribute('data-place')) ? 'true' : 'false');
+    });
+    syncPickState();
+  }
+
+  function pickCandidates() {
+    if (!state.ready || state.storageError) return [];
+    return buildCandidates(state.selectedPlaces);
+  }
+
+  function syncPickState() {
+    var candidates = pickCandidates();
+    var noPlace = state.selectedPlaces.size === 0;
+    var noDish = state.dishes.length === 0;
+
+    els.pickBtn.disabled = candidates.length === 0;
+
+    var hint = '';
+    if (state.storageError) hint = '本地存储不可用';
+    else if (!state.ready) hint = '正在准备本地存储…';
+    else if (noDish) hint = '菜库还空着 · 先记一餐';
+    else if (noPlace) hint = '至少勾一个地点';
+    else if (!candidates.length) hint = '这些地点还没吃过东西';
+    els.pickHint.textContent = hint;
+    els.pickHint.hidden = !hint;
+
+    var showEmpty = candidates.length === 0;
+    els.pickEmpty.hidden = !showEmpty;
+    if (showEmpty) {
+      if (noDish) {
+        els.pickEmptyTitle.textContent = '还选不出来';
+        els.pickEmptyText.textContent = '先记几餐，我才有得挑。菜越多，推荐越像你的口味。';
+      } else if (noPlace) {
+        els.pickEmptyTitle.textContent = '至少勾一个地点';
+        els.pickEmptyText.textContent = '勾上今天能去的地方，我才知道去哪找。';
+      } else if (state.ready) {
+        els.pickEmptyTitle.textContent = '这些地方还没吃过';
+        els.pickEmptyText.textContent = '换几个地点，或者先去记录一餐。';
+      }
+    }
+
+    renderPickResult(candidates);
+  }
+
+  function pickReasons(pick) {
+    var qualityText = '你给它平均打 ' + fmtAvg(pick.sum / pick.count) + ' 分（' + pick.count + ' 次）';
+    if (pick.count <= 2) {
+      qualityText = '你给它平均打 ' + fmtAvg(pick.sum / pick.count) + ' 分（' +
+        pick.count + ' 次，样本少，已向均值收缩）';
+    }
+    var items = [
+      { weight: state.weights.q * pick.q, text: qualityText },
+      { weight: state.weights.f * pick.f, text: pick.days < 1 ? '今天刚吃过，还惦记着' : '已经 ' + Math.floor(pick.days) + ' 天没吃了' },
+      { weight: state.weights.d * pick.d, text: '走过去只要 ' + pick.walkMin + ' 分钟' }
+    ];
+    items.sort(function (a, b) { return b.weight - a.weight; });
+    return items.slice(0, 2).map(function (item) { return item.text; });
+  }
+
+  function renderPickResult(candidates) {
+    var pick = state.currentPick;
+    if (!pick) {
+      els.pickResult.hidden = true;
+      return;
+    }
+    var still = (candidates || pickCandidates()).some(function (c) {
+      return c.id === pick.id && c.placeId === pick.placeId;
+    });
+    if (!still) {
+      state.currentPick = null;
+      els.pickResult.hidden = true;
+      return;
+    }
+
+    els.pickWhere.textContent = pick.placeName + ' · 走 ' + pick.walkMin + ' 分钟';
+    els.pickDish.textContent = pick.name;
+    els.pickReasons.innerHTML = pickReasons(pick).map(function (reason) {
+      return '<li>' + escapeHtml(reason) + '</li>';
+    }).join('');
+    els.pickMeta.textContent = '平均 ' + fmtAvg(pick.sum / pick.count) + ' 分 · 吃过 ' +
+      pick.count + ' 次 · 上次 ' + lastText(pick.lastTs);
+    els.pickResult.hidden = false;
+  }
+
+  function doPick(excludeId) {
+    var candidates = pickCandidates();
+    if (!candidates.length) return null;
+
+    var pool = candidates.filter(function (c) {
+      return c.id !== excludeId && state.pickShown.indexOf(c.id) === -1;
+    });
+    if (!pool.length) {
+      state.pickShown = excludeId ? [excludeId] : [];
+      pool = candidates.filter(function (c) { return c.id !== excludeId; });
+      if (!pool.length) pool = candidates;
+    }
+
+    var pick = pool[0];
+    state.currentPick = pick;
+    state.pickShown.push(pick.id);
+    renderPick();
+    els.screens.pick.scrollTop = 0;
+    return pick;
+  }
+
+  function advancePick() {
+    var current = state.currentPick;
+    if (!current) {
+      doPick(null);
+      return;
+    }
+    recordFeedback(current, 'reject');
+    doPick(current.id);
+  }
+
+  function recordFeedback(pick, action) {
+    var feedback = {
+      id: newId(),
+      ts: Date.now(),
+      mode: 'pick',
+      dishId: pick.id,
+      action: action,
+      q: pick.q,
+      f: pick.f,
+      d: pick.d
+    };
+    state.feedback.push(feedback);
+    applyLearnedWeights();
+    dbPut('feedback', feedback).catch(function (err) {
+      console.error('反馈没存下', err);
+    });
+  }
+
+  function acceptPick() {
+    var pick = state.currentPick;
+    if (!pick) return;
+    recordFeedback(pick, 'accept');
+
+    var same = state.draftItems.some(function (item) {
+      return cleanName(item.name).toLowerCase() === pick.name.toLowerCase();
+    });
+    if (!same) {
+      state.draftItems.push({
+        key: 'd' + (++draftSeq),
+        name: pick.name,
+        rating: null,
+        photo: null,
+        thumbUrl: '',
+        photoMatch: null,
+        nameMatch: null
+      });
+    }
+
+    state.draftPlaceId = pick.placeId;
+    rememberPlace(pick.placeId);
+    buildPlaceSelect();
+    state.currentPick = null;
+    state.pickShown = [];
+    showScreen('add');
+    renderDraft();
+    toast('已填好「' + pick.name + '」，选个评分就能存');
+  }
+
+  /* ================= 记录页草稿（T3） ================= */
+  var draftSeq = 0;
+  var pendingPhotoKey = null;
+  var processingPhotos = 0;
+  var savingMeal = false;
+
+  function renderAdd() {
+    renderDraft();
+  }
+
+  function draftItem(key) {
+    for (var i = 0; i < state.draftItems.length; i++) {
+      if (state.draftItems[i].key === key) return state.draftItems[i];
+    }
+    return null;
+  }
+
+  function addDraftItem() {
+    var item = { key: 'd' + (++draftSeq), name: '', rating: null, photo: null, thumbUrl: '' };
+    state.draftItems.push(item);
+    renderDraft();
+    var input = els.draftList.querySelector('[data-name="' + item.key + '"]');
+    if (input) input.focus();
+  }
+
+  function removeDraftItem(key) {
+    state.draftItems = state.draftItems.filter(function (item) {
+      if (item.key !== key) return true;
+      if (item.thumbUrl) URL.revokeObjectURL(item.thumbUrl);
+      return false;
+    });
+    renderDraft();
+  }
+
+  function clearDraft() {
+    state.draftItems.forEach(function (item) {
+      if (item.thumbUrl) URL.revokeObjectURL(item.thumbUrl);
+    });
+    state.draftItems = [];
+    renderDraft();
+  }
+
+  function setRating(key, value) {
+    var item = draftItem(key);
+    if (!item) return;
+    item.rating = value;
+    $$('.rate[data-key="' + key + '"]', els.draftList).forEach(function (btn) {
+      var same = parseInt(btn.getAttribute('data-rate'), 10) === value;
+      btn.setAttribute('aria-pressed', same ? 'true' : 'false');
+    });
+    updateSaveState();
+  }
+
+  function draftItemHtml(item) {
+    var thumb = item.thumbUrl
+      ? '<img src="' + item.thumbUrl + '" alt="">' +
+        '<span class="thumb-again">换</span>'
+      : '<svg viewBox="0 0 24 24" aria-hidden="true">' +
+          '<path d="M4.5 8.5h3l1.4-2.2h6.2l1.4 2.2h3A1.5 1.5 0 0 1 21 10v8a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18v-8a1.5 1.5 0 0 1 1.5-1.5Z"/>' +
+          '<circle cx="12" cy="13.5" r="3.6"/>' +
+        '</svg>' +
+        '<span class="thumb-label">拍照</span>';
+
+    var ratingButtons = [0, 1, 2].map(function (value) {
+      return '<button type="button" class="rate rate-' + value + '" data-rate="' + value +
+        '" data-key="' + item.key + '" aria-pressed="' + (item.rating === value ? 'true' : 'false') + '">' +
+        RATING_WORDS[value] + '</button>';
+    }).join('');
+
+    var suggestHtml = '';
+    if (item.photoMatch) {
+      suggestHtml = '<div class="photo-suggest">' +
+        '<span class="suggest-text">是「' + escapeHtml(item.photoMatch.name) + '」吗？' +
+          '<em>' + Math.round(item.photoMatch.score * 100) + '% 像</em></span>' +
+        '<span class="suggest-actions">' +
+          '<button type="button" class="suggest-btn suggest-yes" data-photo-yes="' + item.key + '">是</button>' +
+          '<button type="button" class="suggest-btn suggest-no" data-photo-no="' + item.key + '">不是</button>' +
+        '</span>' +
+      '</div>';
+    }
+
+    return '<li class="dish" data-item="' + item.key + '">' +
+      '<button type="button" class="thumb' + (item.thumbUrl ? ' has-photo' : '') +
+        '" data-photo="' + item.key + '" aria-label="' + (item.thumbUrl ? '换一张照片' : '给这道菜拍照') + '">' +
+        thumb +
+      '</button>' +
+      '<div class="dish-body">' +
+        '<div class="dish-line">' +
+          '<input class="dish-name" data-name="' + item.key + '" type="text" maxlength="30" ' +
+            'enterkeyhint="done" autocomplete="off" placeholder="菜名，如香辣鸡腿饭" value="' +
+            escapeHtml(item.name) + '">' +
+          '<button type="button" class="dish-del" data-del="' + item.key + '" aria-label="删掉这道菜">' +
+            '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg>' +
+          '</button>' +
+        '</div>' +
+        '<div class="name-suggest" data-name-suggest hidden></div>' +
+        '<div class="rating" role="group" aria-label="这道菜怎么样">' + ratingButtons + '</div>' +
+        suggestHtml +
+      '</div>' +
+    '</li>';
+  }
+
+  function renderDraft() {
+    var hasItems = state.draftItems.length > 0;
+    var recentStats = recentDishes();
+    var hasRecent = !hasItems && recentStats.length > 0;
+
+    els.addEmpty.hidden = hasItems || hasRecent;
+    els.draftWrap.hidden = !hasItems;
+    els.draftList.innerHTML = hasItems ? state.draftItems.map(draftItemHtml).join('') : '';
+    els.saveBlock.classList.toggle('is-docked', hasItems);
+    renderRecent(recentStats);
+    renderHomeSub();
+    updateSaveState();
+    if (hasItems) state.draftItems.forEach(refreshNameSuggest);
+  }
+
+  function recentDishes() {
+    return dishStats().sort(function (a, b) {
+      return (b.lastTs || 0) - (a.lastTs || 0);
+    }).slice(0, 3);
+  }
+
+  function renderRecent(stats) {
+    stats = stats || recentDishes();
+    var show = stats.length > 0 && state.draftItems.length === 0;
+    els.recentStrip.hidden = !show;
+    if (!show) {
+      els.recentList.innerHTML = '';
+      return;
+    }
+    els.recentList.innerHTML = stats.map(function (stat) {
+      var where = placeName(stat.lastPlaceId);
+      var meta = (where ? where + ' · ' : '') + lastText(stat.lastTs) + '吃过';
+      return '<button type="button" class="recent-chip" data-recent-dish="' + stat.id + '">' +
+        '<span class="recent-name">' + escapeHtml(stat.name) + '</span>' +
+        '<span class="recent-meta">' + escapeHtml(meta) + '</span>' +
+      '</button>';
+    }).join('');
+  }
+
+  function renderHomeSub() {
+    if (!state.meals.length) {
+      els.homeSub.textContent = '记下这一餐吃了什么，打一个分。';
+      return;
+    }
+    var latest = state.meals.reduce(function (max, meal) {
+      return Math.max(max, meal.ts || 0);
+    }, 0);
+    els.homeSub.textContent = '已记 ' + state.meals.length + ' 餐 · ' +
+      dishStats().length + ' 道菜 · 上次 ' + lastText(latest);
+  }
+
+  function addRecentDish(dishId) {
+    var dish = dishById(dishId);
+    if (!dish) return;
+    var item = {
+      key: 'd' + (++draftSeq),
+      name: dish.name,
+      rating: null,
+      photo: null,
+      thumbUrl: '',
+      photoMatch: null,
+      nameMatch: null
+    };
+    state.draftItems.push(item);
+    renderDraft();
+    var row = els.draftList.querySelector('[data-item="' + item.key + '"]');
+    if (row) row.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    toast('已加「' + dish.name + '」，选个评分就能存');
+  }
+
+  /* 保存按钮是否可用，以及按钮下方那句提示，都在这里统一算。 */
+  function updateSaveState() {
+    var named = [];
+    var nameless = null;
+    var missingRating = null;
+    var duplicate = '';
+    var seen = {};
+
+    state.draftItems.forEach(function (item) {
+      var name = cleanName(item.name);
+      if (!name) {
+        if (!nameless && (item.rating !== null || item.photo)) nameless = item;
+        return;
+      }
+      named.push(item);
+      if (!missingRating && item.rating === null) missingRating = item;
+      var key = name.toLowerCase();
+      if (seen[key] && !duplicate) duplicate = name;
+      seen[key] = true;
+    });
+
+    var hint = '';
+    var canSave = false;
+    if (!state.draftItems.length) {
+      hint = '先加一道菜，就能保存了';
+    } else if (nameless) {
+      hint = '有一道菜还没写名字';
+    } else if (!named.length) {
+      hint = '写个菜名，就能保存了';
+    } else if (missingRating) {
+      hint = '「' + cleanName(missingRating.name) + '」还没选好吃程度';
+    } else if (duplicate) {
+      hint = '「' + duplicate + '」重复了，删掉一道再存';
+    } else if (processingPhotos > 0) {
+      hint = '正在处理照片…';
+    } else if (state.storageError) {
+      hint = '本地存储不可用，存不下';
+    } else if (!state.ready) {
+      hint = '正在准备本地存储…';
+    } else {
+      canSave = true;
+      var where = placeName(state.draftPlaceId);
+      hint = named.length + ' 道菜' + (where ? ' · ' + where : '');
+    }
+
+    els.saveMeal.disabled = !canSave || savingMeal;
+    els.saveMeal.textContent = savingMeal ? '保存中…' : '保存这一餐';
+    els.saveHint.textContent = hint;
+  }
+
+  /* 压缩：长边 1024、JPEG 0.8。透明 PNG 先铺白底，避免转 JPEG 发黑。 */
+  function compressPhoto(file) {
+    return new Promise(function (resolve, reject) {
+      var objectUrl = URL.createObjectURL(file);
+      var img = new Image();
+      img.onload = function () {
+        try {
+          var longest = Math.max(img.naturalWidth, img.naturalHeight) || 1;
+          var scale = Math.min(1, PHOTO_MAX_EDGE / longest);
+          var width = Math.max(1, Math.round(img.naturalWidth * scale));
+          var height = Math.max(1, Math.round(img.naturalHeight * scale));
+          var canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          var ctx = canvas.getContext('2d');
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, width, height);
+          ctx.drawImage(img, 0, 0, width, height);
+          canvas.toBlob(function (blob) {
+            URL.revokeObjectURL(objectUrl);
+            if (blob) resolve({ blob: blob, w: width, h: height });
+            else reject(new Error('照片压缩失败'));
+          }, 'image/jpeg', PHOTO_QUALITY);
+        } catch (err) {
+          URL.revokeObjectURL(objectUrl);
+          reject(err);
+        }
+      };
+      img.onerror = function () {
+        URL.revokeObjectURL(objectUrl);
+        reject(new Error('这张照片读不出来'));
+      };
+      img.src = objectUrl;
+    });
+  }
+
+  /* dHash：缩到 9×8 灰度，逐行比较左右相邻像素，得到 64 位 0/1。
+     两张照片的相似度 = 1 - 汉明距离 / 64。 */
+  function computeDHash(blob) {
+    return new Promise(function (resolve, reject) {
+      var objectUrl = URL.createObjectURL(blob);
+      var img = new Image();
+      img.onload = function () {
+        try {
+          var canvas = document.createElement('canvas');
+          canvas.width = 9;
+          canvas.height = 8;
+          var ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, 9, 8);
+          var data = ctx.getImageData(0, 0, 9, 8).data;
+          var gray = [];
+          for (var i = 0; i < 72; i++) {
+            gray.push(0.299 * data[i * 4] + 0.587 * data[i * 4 + 1] + 0.114 * data[i * 4 + 2]);
+          }
+          var bits = '';
+          for (var y = 0; y < 8; y++) {
+            for (var x = 0; x < 8; x++) {
+              bits += gray[y * 9 + x] > gray[y * 9 + x + 1] ? '1' : '0';
+            }
+          }
+          URL.revokeObjectURL(objectUrl);
+          resolve(bits);
+        } catch (err) {
+          URL.revokeObjectURL(objectUrl);
+          reject(err);
+        }
+      };
+      img.onerror = function () {
+        URL.revokeObjectURL(objectUrl);
+        reject(new Error('照片读不出来'));
+      };
+      img.src = objectUrl;
+    });
+  }
+
+  function hammingDistance(a, b) {
+    if (!a || !b || a.length !== b.length) return 64;
+    var distance = 0;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i] !== b[i]) distance += 1;
+    }
+    return distance;
+  }
+
+  function photoSimilarity(a, b, ha, hb) {
+    var shape = 1 - hammingDistance(a, b) / 64;
+    if (!ha || !hb || ha.length !== hb.length) return shape;
+    var dot = 0;
+    for (var i = 0; i < ha.length; i++) dot += ha[i] * hb[i];
+    return shape * 0.5 + dot * 0.5;
+  }
+
+  /* 一次解码同时算出两种指纹：
+     hash = dHash（轮廓/结构），hist = 4×4×4 颜色直方图（色调分布）。
+     食物照里"颜色"的区分力比轮廓强得多（香蕉黄 / 米饭白 / 青菜绿）。 */
+  function computePhotoMarks(blob) {
+    return new Promise(function (resolve, reject) {
+      var objectUrl = URL.createObjectURL(blob);
+      var img = new Image();
+      img.onload = function () {
+        try {
+          var c9 = document.createElement('canvas');
+          c9.width = 9; c9.height = 8;
+          var g9 = c9.getContext('2d');
+          g9.drawImage(img, 0, 0, 9, 8);
+          var d9 = g9.getImageData(0, 0, 9, 8).data;
+          var gray = [];
+          for (var i = 0; i < 72; i++) {
+            gray.push(0.299 * d9[i * 4] + 0.587 * d9[i * 4 + 1] + 0.114 * d9[i * 4 + 2]);
+          }
+          var bits = '';
+          for (var y = 0; y < 8; y++) {
+            for (var x = 0; x < 8; x++) {
+              bits += gray[y * 9 + x] > gray[y * 9 + x + 1] ? '1' : '0';
+            }
+          }
+
+          var c64 = document.createElement('canvas');
+          c64.width = 64; c64.height = 64;
+          var g64 = c64.getContext('2d');
+          g64.drawImage(img, 0, 0, 64, 64);
+          var d64 = g64.getImageData(0, 0, 64, 64).data;
+          var hist = [];
+          for (var k = 0; k < 64; k++) hist.push(0);
+          for (var j = 0; j < d64.length; j += 4) {
+            hist[((d64[j] >> 6) << 4) | ((d64[j + 1] >> 6) << 2) | (d64[j + 2] >> 6)] += 1;
+          }
+          var norm = 0;
+          for (var m = 0; m < 64; m++) norm += hist[m] * hist[m];
+          norm = Math.sqrt(norm) || 1;
+          for (var n = 0; n < 64; n++) hist[n] = hist[n] / norm;
+
+          URL.revokeObjectURL(objectUrl);
+          resolve({ hash: bits, hist: hist });
+        } catch (err) {
+          URL.revokeObjectURL(objectUrl);
+          reject(err);
+        }
+      };
+      img.onerror = function () {
+        URL.revokeObjectURL(objectUrl);
+        reject(new Error('照片读不出来'));
+      };
+      img.src = objectUrl;
+    });
+  }
+
+  function findPhotoMatch(hash, hist, currentName) {
+    if (!hash) return null;
+    var current = cleanName(currentName).toLowerCase();
+    var best = null;
+    state.meals.forEach(function (meal) {
+      (meal.items || []).forEach(function (item) {
+        if (!item.photoHash || item.photoHash.length !== 64) return;
+        if (current && item.name.toLowerCase() === current) return;
+        var score = photoSimilarity(hash, item.photoHash, hist, item.photoHist);
+        if (score < PHOTO_MATCH_THRESHOLD) return;
+        if (!best || score > best.score) {
+          best = { dishId: item.dishId, name: item.name, score: score };
+        }
+      });
+    });
+    return best;
+  }
+
+  function confirmPhotoMatch(key) {
+    var item = draftItem(key);
+    if (!item || !item.photoMatch) return;
+    var name = item.photoMatch.name;
+    item.name = name;
+    item.photoMatch = null;
+    renderDraft();
+    toast('已填成「' + name + '」');
+  }
+
+  function rejectPhotoMatch(key) {
+    var item = draftItem(key);
+    if (!item) return;
+    item.photoMatch = null;
+    renderDraft();
+  }
+
+  /* ---------- 菜名归一化（T7） ---------- */
+  function normalizeNameForMatch(name) {
+    return cleanName(name).toLowerCase().replace(/[\s·・\-—_()（）\[\]【】]/g, '');
+  }
+
+  function levenshtein(a, b) {
+    if (a === b) return 0;
+    var m = a.length;
+    var n = b.length;
+    if (!m) return n;
+    if (!n) return m;
+    var prev = [];
+    var cur = [];
+    for (var j = 0; j <= n; j++) prev[j] = j;
+    for (var i = 1; i <= m; i++) {
+      cur[0] = i;
+      for (var k = 1; k <= n; k++) {
+        var cost = a.charAt(i - 1) === b.charAt(k - 1) ? 0 : 1;
+        cur[k] = Math.min(prev[k] + 1, cur[k - 1] + 1, prev[k - 1] + cost);
+      }
+      var swap = prev;
+      prev = cur;
+      cur = swap;
+    }
+    return prev[n];
+  }
+
+  function nameSimilarity(a, b) {
+    var x = normalizeNameForMatch(a);
+    var y = normalizeNameForMatch(b);
+    if (!x || !y) return 0;
+    if (x === y) return 1;
+    var score = 1 - levenshtein(x, y) / Math.max(x.length, y.length);
+    var short = x.length <= y.length ? x : y;
+    var long = x.length <= y.length ? y : x;
+    if (short.length >= 2 && long.indexOf(short) !== -1) {
+      // 子串关系（如「鸡腿饭」⊂「香辣鸡腿饭」）：按覆盖率给分，覆盖不到一半的不算
+      score = Math.max(score, 0.5 + 0.5 * (short.length / long.length));
+    }
+    return score;
+  }
+
+  function findNameMatch(input) {
+    var typed = cleanName(input);
+    var typedKey = normalizeNameForMatch(typed);
+    if (typedKey.length < 2) return null;
+    var best = null;
+    state.dishes.forEach(function (dish) {
+      if (normalizeNameForMatch(dish.name) === typedKey) return;
+      var candidates = [dish.name].concat(dish.aliases || []);
+      candidates.forEach(function (candidate) {
+        var score = nameSimilarity(typed, candidate);
+        if (score < NAME_MATCH_THRESHOLD) return;
+        if (!best || score > best.score) {
+          best = { dishId: dish.id, name: dish.name, score: score };
+        }
+      });
+    });
+    return best;
+  }
+
+  function refreshNameSuggest(item) {
+    var row = els.draftList.querySelector('[data-item="' + item.key + '"]');
+    var box = row && row.querySelector('[data-name-suggest]');
+    if (!box) return;
+    var typedKey = normalizeNameForMatch(item.name);
+    if (typedKey.length < 2 ||
+        (item.nameSuggestDismissed && item.nameSuggestDismissed === typedKey)) {
+      box.hidden = true;
+      box.innerHTML = '';
+      item.nameMatch = null;
+      return;
+    }
+    var match = findNameMatch(item.name);
+    item.nameMatch = match;
+    if (!match) {
+      box.hidden = true;
+      box.innerHTML = '';
+      return;
+    }
+    box.innerHTML = '<span class="name-suggest-text">已有「' + escapeHtml(match.name) + '」' +
+      '<em>' + Math.round(match.score * 100) + '% 像</em></span>' +
+      '<span class="suggest-actions">' +
+        '<button type="button" class="suggest-btn suggest-use" data-use-name="' + item.key + '">用这个</button>' +
+        '<button type="button" class="suggest-btn suggest-no" data-dismiss-name="' + item.key + '">不用</button>' +
+      '</span>';
+    box.hidden = false;
+  }
+
+  function useNameMatch(key) {
+    var item = draftItem(key);
+    if (!item || !item.nameMatch) return;
+    var typed = cleanName(item.name);
+    var match = item.nameMatch;
+
+    item.name = match.name;
+    item.nameMatch = null;
+    item.nameSuggestDismissed = null;
+    var input = els.draftList.querySelector('[data-name="' + key + '"]');
+    if (input) input.value = match.name;
+    var box = els.draftList.querySelector('[data-item="' + key + '"] [data-name-suggest]');
+    if (box) { box.hidden = true; box.innerHTML = ''; }
+    updateSaveState();
+
+    var dish = dishById(match.dishId);
+    if (dish && typed && normalizeNameForMatch(typed) !== normalizeNameForMatch(match.name)) {
+      var aliases = dish.aliases || [];
+      var known = aliases.some(function (alias) {
+        return normalizeNameForMatch(alias) === normalizeNameForMatch(typed);
+      });
+      if (!known) {
+        aliases.push(typed);
+        dish.aliases = aliases;
+        dbPut('dishes', dish).catch(function (err) {
+          console.error('别名保存失败', err);
+        });
+      }
+    }
+    toast('已用「' + match.name + '」');
+  }
+
+  function dismissNameMatch(key) {
+    var item = draftItem(key);
+    if (!item) return;
+    item.nameSuggestDismissed = normalizeNameForMatch(item.name);
+    item.nameMatch = null;
+    var box = els.draftList.querySelector('[data-item="' + key + '"] [data-name-suggest]');
+    if (box) { box.hidden = true; box.innerHTML = ''; }
+  }
+
+  /* 老记录里的照片没有 hash：启动后空闲时补算，保证它们也能被联想命中。 */
+  function backfillPhotoHashes() {
+    var jobs = [];
+    state.meals.forEach(function (meal) {
+      (meal.items || []).forEach(function (item) {
+        if (item.photoBlob && (!item.photoHash || !item.photoHist)) jobs.push({ meal: meal, item: item });
+      });
+    });
+    if (!jobs.length) return;
+    var chain = Promise.resolve();
+    jobs.forEach(function (job) {
+      chain = chain.then(function () {
+        if (job.item.photoHash && job.item.photoHist) return null;
+        return computePhotoMarks(job.item.photoBlob).then(function (marks) {
+          job.item.photoHash = marks.hash;
+          job.item.photoHist = marks.hist;
+          return dbPut('meals', job.meal);
+        }).catch(function () { return null; });
+      });
+    });
+  }
+
+  function takePhoto(key) {
+    pendingPhotoKey = key;
+    els.photoInput.click();
+  }
+
+  function handlePhotoFile(file) {
+    var key = pendingPhotoKey;
+    pendingPhotoKey = null;
+    if (!file || !key) return;
+    if (file.type && file.type.indexOf('image/') !== 0) {
+      toast('请选一张照片');
+      return;
+    }
+    var item = draftItem(key);
+    if (!item) return;
+
+    processingPhotos += 1;
+    updateSaveState();
+    toast('正在处理照片…');
+
+    compressPhoto(file).then(function (photo) {
+      return computePhotoMarks(photo.blob).then(function (marks) {
+        photo.hash = marks.hash;
+        photo.hist = marks.hist;
+        return photo;
+      });
+    }).then(function (photo) {
+      var target = draftItem(key);
+      if (!target) return;
+      target.photo = photo;
+      if (target.thumbUrl) URL.revokeObjectURL(target.thumbUrl);
+      target.thumbUrl = URL.createObjectURL(photo.blob);
+      target.photoMatch = findPhotoMatch(photo.hash, photo.hist, target.name);
+      renderDraft();
+      if (target.photoMatch) {
+        toast('这张照片像「' + target.photoMatch.name + '」');
+      } else {
+        toast('照片已压缩到 ' + photo.w + '×' + photo.h);
+      }
+    }).catch(function (err) {
+      toast(err.message || '照片处理失败');
+    }).then(function () {
+      processingPhotos = Math.max(0, processingPhotos - 1);
+      updateSaveState();
+    });
+  }
+
+  /* ---------- 新增地点 ---------- */
+  function showPlaceError(message) {
+    els.placeError.textContent = message;
+    els.placeError.hidden = false;
+  }
+
+  var editingPlaceId = null;
+
+  function placeById(id) {
+    for (var i = 0; i < state.places.length; i++) {
+      if (state.places[i].id === id) return state.places[i];
+    }
+    return null;
+  }
+
+  function openPlaceDialog(place) {
+    if (els.placeDialog.open) return;
+    els.placeError.hidden = true;
+    editingPlaceId = place ? place.id : null;
+    els.placeTitle.textContent = place ? '改地点' : '新增地点';
+    els.placeSubmit.textContent = place ? '保存' : '存下';
+    els.placeName.value = place ? place.name : '';
+    els.placeWalk.value = place ? String(place.walkMin) : '10';
+    if (typeof els.placeDialog.showModal === 'function') els.placeDialog.showModal();
+    else els.placeDialog.setAttribute('open', '');
+    setTimeout(function () { els.placeName.focus(); }, 30);
+  }
+
+  function closePlaceDialog() {
+    editingPlaceId = null;
+    if (typeof els.placeDialog.close === 'function') els.placeDialog.close();
+    else els.placeDialog.removeAttribute('open');
+  }
+
+  function submitPlace() {
+    var name = cleanName(els.placeName.value);
+    var walk = parseInt(els.placeWalk.value, 10);
+    if (!name) { showPlaceError('先给它起个名字'); return; }
+    var dup = state.places.some(function (p) {
+      return p.name === name && p.id !== editingPlaceId;
+    });
+    if (dup) { showPlaceError('这个地点已经有了'); return; }
+    if (!isFinite(walk) || walk < 0 || walk > 60) { showPlaceError('步行分钟填 0 到 60'); return; }
+
+    var editing = editingPlaceId ? placeById(editingPlaceId) : null;
+
+    if (editing) {
+      dbPut('places', { id: editing.id, name: name, walkMin: walk }).then(function () {
+        editing.name = name;
+        editing.walkMin = walk;
+        buildPlaceSelect();
+        buildPlaceChips();
+        syncChips();
+        renderPlaceList();
+        closePlaceDialog();
+        updateSaveState();
+        toast('已改成「' + name + '」');
+      }).catch(function (err) {
+        showPlaceError('存不下：' + ((err && err.message) || '未知错误'));
+      });
+      return;
+    }
+
+    var place = { id: newId(), name: name, walkMin: walk };
+    dbPut('places', place).then(function () {
+      state.places.push(place);
+      state.draftPlaceId = place.id;
+      rememberPlace(place.id);
+      buildPlaceSelect();
+      buildPlaceChips();
+      syncChips();
+      closePlaceDialog();
+      updateSaveState();
+      if (els.placeManageDialog.open) renderPlaceList();
+      toast('已加上「' + name + '」');
+    }).catch(function (err) {
+      showPlaceError('存不下：' + ((err && err.message) || '未知错误'));
+    });
+  }
+
+  /* ---------- 地点管理 ---------- */
+  function openPlaceManage() {
+    renderPlaceList();
+    if (typeof els.placeManageDialog.showModal === 'function') els.placeManageDialog.showModal();
+    else els.placeManageDialog.setAttribute('open', '');
+  }
+
+  function closePlaceManage() {
+    if (typeof els.placeManageDialog.close === 'function') els.placeManageDialog.close();
+    else els.placeManageDialog.removeAttribute('open');
+  }
+
+  function renderPlaceList() {
+    if (!els.placeList) return;
+    if (!state.places.length) {
+      els.placeList.innerHTML = '<p class="sheet-hint">还没有地点，先加一个。</p>';
+      return;
+    }
+    els.placeList.innerHTML = state.places.map(function (p) {
+      var used = state.meals.filter(function (m) { return m.placeId === p.id; }).length;
+      return '<div class="place-row">' +
+        '<span class="p-name">' + escapeHtml(p.name) + '</span>' +
+        '<span class="p-walk">' + p.walkMin + ' 分钟' + (used ? ' · ' + used + ' 条' : '') + '</span>' +
+        '<button type="button" class="link-btn" data-place-edit="' + p.id + '">改</button>' +
+        '<button type="button" class="link-btn danger" data-place-del="' + p.id + '">删</button>' +
+        '</div>';
+    }).join('');
+  }
+
+  function deletePlace(id) {
+    var place = placeById(id);
+    if (!place) return;
+    if (state.places.length <= 1) { toast('至少要留一个地点'); return; }
+    var used = state.meals.filter(function (m) { return m.placeId === id; }).length;
+    if (used) { toast('有 ' + used + ' 条记录在这儿，不能删'); return; }
+    dbDel('places', id).then(function () {
+      state.places = state.places.filter(function (p) { return p.id !== id; });
+      if (state.draftPlaceId === id) {
+        state.draftPlaceId = (state.places[0] && state.places[0].id) || '';
+      }
+      if (state.selectedPlaces) state.selectedPlaces['delete'](id);
+      buildPlaceSelect();
+      buildPlaceChips();
+      syncChips();
+      renderPlaceList();
+      updateSaveState();
+      toast('已删掉「' + place.name + '」');
+    }).catch(function (err) {
+      toast('删不掉：' + ((err && err.message) || '未知错误'));
+    });
+  }
+
+  /* ---------- 保存这一餐 ---------- */
+  function saveMeal() {
+    if (savingMeal || els.saveMeal.disabled) return;
+    var items = state.draftItems.filter(function (item) { return cleanName(item.name); });
+    if (!items.length) return;
+
+    savingMeal = true;
+    updateSaveState();
+
+    var ts = Date.now();
+    var placeId = state.draftPlaceId || ((state.places[0] && state.places[0].id) || '');
+    var dishByName = {};
+    var chain = Promise.resolve();
+
+    items.forEach(function (item) {
+      var name = cleanName(item.name);
+      var key = name.toLowerCase();
+      chain = chain.then(function () {
+        if (dishByName[key]) return dishByName[key];
+        var existing = findDishByName(name);
+        if (existing) {
+          dishByName[key] = existing;
+          return existing;
+        }
+        var dish = { id: newId(), name: name, aliases: [], tags: [], created: Date.now() };
+        return dbPut('dishes', dish).then(function () {
+          state.dishes.push(dish);
+          dishByName[key] = dish;
+          return dish;
+        });
+      });
+    });
+
+    chain.then(function () {
+      var meal = {
+        id: newId(),
+        ts: ts,
+        placeId: placeId,
+        items: items.map(function (item) {
+          var dish = dishByName[cleanName(item.name).toLowerCase()];
+          return {
+            dishId: dish.id,
+            name: dish.name,
+            rating: item.rating,
+            photoHash: item.photo ? (item.photo.hash || null) : null,
+        photoHist: item.photo ? (item.photo.hist || null) : null,
+            photoBlob: item.photo ? item.photo.blob : null,
+            photoW: item.photo ? item.photo.w : 0,
+            photoH: item.photo ? item.photo.h : 0
+          };
+        })
+      };
+      return dbPut('meals', meal).then(function () { return meal; });
+    }).then(function (meal) {
+      state.meals.push(meal);
+      rememberPlace(placeId);
+      savingMeal = false;
+      clearDraft();
+      renderLib();
+      renderPick();
+      toast('已记录 ' + meal.items.length + ' 道菜');
+    }).catch(function (err) {
+      savingMeal = false;
+      updateSaveState();
+      console.error('保存失败', err);
+      toast('没存下：' + ((err && err.message) || '未知错误'));
+    });
+  }
+
+  /* ================= 菜库聚合（T4） =================
+     一次遍历 meals 汇总每道菜：次数、评分总和、上次时间、照片。
+     排序用贝叶斯平滑质量分（项目方案 ③，C=2、先验 3.0）：
+     次数少的菜不会被一次高分顶到最前；T8 再换成完整推荐分。 */
+  var detailPhotoUrls = [];
+  var listPhotoUrls = [];
+
+  function releaseListPhotoUrls() {
+    listPhotoUrls.forEach(function (url) { URL.revokeObjectURL(url); });
+    listPhotoUrls = [];
+  }
+
+  function listPhotoUrl(blob) {
+    var url = URL.createObjectURL(blob);
+    listPhotoUrls.push(url);
+    return url;
+  }
+
+  function releaseDetailPhotoUrls() {
+    detailPhotoUrls.forEach(function (url) { URL.revokeObjectURL(url); });
+    detailPhotoUrls = [];
+  }
+
+  function dishStats() {
+    var map = {};
+    state.dishes.forEach(function (dish) {
+      map[dish.id] = {
+        id: dish.id, name: dish.name, count: 0, sum: 0,
+        lastTs: 0, lastPlaceId: '', places: {}, photo: null, photoTs: 0
+      };
+    });
+    state.meals.forEach(function (meal) {
+      var ts = meal.ts || 0;
+      (meal.items || []).forEach(function (item) {
+        var stat = map[item.dishId];
+        if (!stat) return;
+        stat.count += 1;
+        stat.sum += RATING_SCORES[item.rating] || 0;
+        if (ts > stat.lastTs) {
+          stat.lastTs = ts;
+          stat.lastPlaceId = meal.placeId || '';
+        }
+        if (meal.placeId) stat.places[meal.placeId] = (stat.places[meal.placeId] || 0) + 1;
+        if (item.photoBlob && ts >= stat.photoTs) {
+          stat.photo = item.photoBlob;
+          stat.photoTs = ts;
+          stat.photoMealId = meal.id;
+        }
+      });
+    });
+    return Object.keys(map).map(function (key) { return map[key]; }).filter(function (stat) {
+      return stat.count > 0;
+    });
+  }
+
+  function qualityOf(stat) {
+    return (stat.sum + QUALITY_C * QUALITY_PRIOR) / (stat.count + QUALITY_C);
+  }
+
+  function sortStats(stats) {
+    return stats.sort(function (a, b) {
+      var diff = qualityOf(b) - qualityOf(a);
+      if (Math.abs(diff) > 0.0001) return diff;
+      if (a.count !== b.count) return b.count - a.count;
+      return b.lastTs - a.lastTs;
+    });
+  }
+
+  /* ================= 推荐打分（T8） =================
+     q 质量 / f 新鲜 / d 距离 / ucb 探索；
+     score = 0.9 × (wq·q + wf·f + wd·d) + 0.1 × ucb。
+     地点是硬约束：只考虑在已勾选地点吃过的菜。 */
+  function asPlaceSet(placeIds) {
+    if (placeIds instanceof Set) return placeIds;
+    var set = new Set();
+    (placeIds || []).forEach(function (id) { set.add(id); });
+    return set;
+  }
+
+  function bestPlaceFor(stat, placeIds) {
+    var selected = asPlaceSet(placeIds);
+    var best = null;
+    Object.keys(stat.places || {}).forEach(function (placeId) {
+      if (!selected.has(placeId)) return;
+      var place = state.places.filter(function (p) { return p.id === placeId; })[0];
+      if (!place) return;
+      var count = stat.places[placeId];
+      if (!best || count > best.count ||
+          (count === best.count && place.walkMin < best.walkMin)) {
+        best = { id: place.id, name: place.name, walkMin: place.walkMin, count: count };
+      }
+    });
+    return best;
+  }
+
+  function totalDishRecords() {
+    var total = 0;
+    state.meals.forEach(function (meal) {
+      total += (meal.items || []).length;
+    });
+    return total;
+  }
+
+  function scoreFor(stat, placeIds, total) {
+    var place = bestPlaceFor(stat, placeIds);
+    if (!place) return null;
+
+    var quality = qualityOf(stat);
+    var q = Math.max(0, Math.min(1, (quality - 1) / 4));
+    var days = Math.max(0, (Date.now() - stat.lastTs) / 86400000);
+    var f = Math.max(0, Math.min(1, days / FRESH_DAYS));
+    var d = 1 / (1 + place.walkMin / WALK_SCALE);
+    var ucb = Math.sqrt(Math.log(total + 1) / (stat.count + 1));
+    var weighted = state.weights.q * q + state.weights.f * f + state.weights.d * d;
+    var score = (1 - EXPLORE_RATIO) * weighted + EXPLORE_RATIO * ucb;
+
+    return {
+      id: stat.id, name: stat.name, count: stat.count, sum: stat.sum,
+      quality: quality, q: q, f: f, d: d, ucb: ucb, score: score,
+      placeId: place.id, placeName: place.name, walkMin: place.walkMin,
+      days: days, lastTs: stat.lastTs
+    };
+  }
+
+  function buildCandidates(placeIds) {
+    var total = totalDishRecords();
+    return dishStats().map(function (stat) {
+      return scoreFor(stat, placeIds, total);
+    }).filter(Boolean).sort(function (a, b) {
+      if (Math.abs(b.score - a.score) > 0.000001) return b.score - a.score;
+      if (a.count !== b.count) return b.count - a.count;
+      return a.lastTs - b.lastTs;
+    });
+  }
+
+  function scoreDish(stat, placeIds) {
+    return scoreFor(stat, placeIds, totalDishRecords());
+  }
+
+  /* ================= 权重学习（T10） =================
+     P = sigmoid(w·x + b)，x=[q,f,d]，y=接受1/换掉0；
+     400 轮梯度下降，lr=0.5；负权重截到 0.05，权重夹在 [0.05,0.7] 后归一化。 */
+  function projectWeights(raw) {
+    var w = raw.map(function (v) { return isFinite(v) ? Math.max(0, v) : 0; });
+    var sum = w[0] + w[1] + w[2];
+    if (sum <= 0) return [DEFAULT_WEIGHTS.q, DEFAULT_WEIGHTS.f, DEFAULT_WEIGHTS.d];
+    w = w.map(function (v) { return v / sum; });
+
+    var deficit = 0;
+    w.forEach(function (v, i) {
+      if (v < WEIGHT_MIN) {
+        deficit += WEIGHT_MIN - v;
+        w[i] = WEIGHT_MIN;
+      }
+    });
+    if (deficit > 0) {
+      var pool = w.reduce(function (s, v) { return s + Math.max(0, v - WEIGHT_MIN); }, 0);
+      if (pool > 0) {
+        w = w.map(function (v) {
+          return v > WEIGHT_MIN ? v - deficit * ((v - WEIGHT_MIN) / pool) : v;
+        });
+      }
+    }
+
+    var over = -1;
+    for (var i = 0; i < 3; i++) if (w[i] > WEIGHT_MAX) over = i;
+    if (over !== -1) {
+      var excess = w[over] - WEIGHT_MAX;
+      w[over] = WEIGHT_MAX;
+      var others = [0, 1, 2].filter(function (j) { return j !== over; });
+      var base = w[others[0]] + w[others[1]];
+      if (base > 0) {
+        w[others[0]] += excess * (w[others[0]] / base);
+        w[others[1]] += excess * (w[others[1]] / base);
+      } else {
+        w[others[0]] += excess / 2;
+        w[others[1]] += excess / 2;
+      }
+    }
+
+    var total = w[0] + w[1] + w[2];
+    return w.map(function (v) { return v / total; });
+  }
+
+  function trainWeights(list) {
+    var data = (list || state.feedback).filter(function (f) {
+      return f && (f.action === 'accept' || f.action === 'reject') &&
+        typeof f.q === 'number' && typeof f.f === 'number' && typeof f.d === 'number';
+    });
+    if (data.length < MIN_FEEDBACK) return null;
+
+    var accepts = 0;
+    data.forEach(function (f) { if (f.action === 'accept') accepts += 1; });
+    if (accepts < 2 || data.length - accepts < 2) return null;
+
+    var w = [DEFAULT_WEIGHTS.q, DEFAULT_WEIGHTS.f, DEFAULT_WEIGHTS.d];
+    var b = 0;
+    for (var epoch = 0; epoch < TRAIN_EPOCHS; epoch++) {
+      var g0 = 0;
+      var g1 = 0;
+      var g2 = 0;
+      var gb = 0;
+      for (var i = 0; i < data.length; i++) {
+        var f = data[i];
+        var z = w[0] * f.q + w[1] * f.f + w[2] * f.d + b;
+        var p = 1 / (1 + Math.exp(-z));
+        var err = p - (f.action === 'accept' ? 1 : 0);
+        g0 += err * f.q;
+        g1 += err * f.f;
+        g2 += err * f.d;
+        gb += err;
+      }
+      var n = data.length;
+      w[0] -= LEARNING_RATE * g0 / n;
+      w[1] -= LEARNING_RATE * g1 / n;
+      w[2] -= LEARNING_RATE * g2 / n;
+      b -= LEARNING_RATE * gb / n;
+    }
+    return projectWeights(w);
+  }
+
+  function applyLearnedWeights() {
+    var trained = trainWeights(state.feedback);
+    if (trained) {
+      state.weights = { q: trained[0], f: trained[1], d: trained[2] };
+      state.learned = true;
+    } else {
+      state.weights = Object.assign({}, DEFAULT_WEIGHTS);
+      state.learned = false;
+    }
+  }
+
+  function weightPercents(weights) {
+    var raw = [weights.q * 100, weights.f * 100, weights.d * 100];
+    var out = raw.map(function (v) { return Math.floor(v); });
+    var remain = 100 - (out[0] + out[1] + out[2]);
+    var order = [0, 1, 2].sort(function (a, b) {
+      return (raw[b] - Math.floor(raw[b])) - (raw[a] - Math.floor(raw[a]));
+    });
+    for (var i = 0; i < remain; i++) out[order[i % 3]] += 1;
+    return out;
+  }
+
+  function fmtAvg(avg) {
+    return avg.toFixed(1).replace(/\.0$/, '');
+  }
+
+  function lastText(ts) {
+    if (!ts) return '还没记';
+    var days = Math.floor((Date.now() - ts) / 86400000);
+    if (days <= 0) return '今天';
+    if (days === 1) return '昨天';
+    return days + ' 天前';
+  }
+
+  function dateText(ts) {
+    var date = new Date(ts);
+    var week = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][date.getDay()];
+    return (date.getMonth() + 1) + '月' + date.getDate() + '日 · ' + week;
+  }
+
+  function starsHtml(avg) {
+    var pct = Math.max(0, Math.min(100, (avg / 5) * 100));
+    return '<span class="stars" aria-label="平均 ' + fmtAvg(avg) + ' 分">' +
+      '<span class="stars-bg">★★★★★</span>' +
+      '<span class="stars-fill" style="width: ' + pct.toFixed(1) + '%">★★★★★</span>' +
+    '</span>';
+  }
+
+  function libRowHtml(stat) {
+    var avg = stat.sum / stat.count;
+    var thumb = (stat.photo && stat.photoMealId)
+      ? '<button type="button" class="lib-thumb-btn" data-photo-open data-meal="' + stat.photoMealId +
+        '" data-dish="' + stat.id + '" aria-label="看「' + escapeHtml(stat.name) + '」的照片">' +
+        '<img src="' + listPhotoUrl(stat.photo) + '" alt=""></button>'
+      : '<span class="lib-thumb-empty" aria-hidden="true"></span>';
+    return '<li class="lib-row">' + thumb +
+      '<button type="button" class="lib-open" data-open-dish="' + stat.id + '">' +
+        '<span class="lib-main">' +
+          '<span class="lib-line">' +
+            '<span class="lib-name">' + escapeHtml(stat.name) + '</span>' +
+            starsHtml(avg) +
+          '</span>' +
+          '<span class="lib-meta">' + stat.count + ' 次 · 平均 ' + fmtAvg(avg) +
+            ' · 上次 ' + lastText(stat.lastTs) + '</span>' +
+        '</span>' +
+      '</button>' +
+      '<button type="button" class="lib-more" data-more-dish="' + stat.id +
+        '" aria-label="更多操作：' + escapeHtml(stat.name) + '">⋯</button>' +
+    '</li>';
+  }
+
+  /* ---------- 看大图 ---------- */
+  var photoViewUrl = null;
+
+  function openPhotoView(mealId, dishId) {
+    var meal = null, item = null;
+    state.meals.forEach(function (m) {
+      if (m.id !== mealId) return;
+      (m.items || []).forEach(function (it) {
+        if (it.dishId === dishId) { meal = m; item = it; }
+      });
+    });
+    if (!item || !item.photoBlob) { toast('这条没有照片'); return; }
+    if (photoViewUrl) { URL.revokeObjectURL(photoViewUrl); photoViewUrl = null; }
+    photoViewUrl = URL.createObjectURL(item.photoBlob);
+    els.photoViewImg.src = photoViewUrl;
+    els.photoViewMeta.textContent = dateText(meal.ts) + ' · ' +
+      (placeName(meal.placeId) || '没记地点') + ' · ' + RATING_WORDS[item.rating];
+    els.photoView.hidden = false;
+  }
+
+  function closePhotoView() {
+    if (els.photoView.hidden) return;
+    els.photoView.hidden = true;
+    els.photoViewImg.removeAttribute('src');
+    if (photoViewUrl) { URL.revokeObjectURL(photoViewUrl); photoViewUrl = null; }
+  }
+
+  document.addEventListener('keydown', function (event) {
+    if (event.key === 'Escape') closePhotoView();
+  });
+
+  function renderLibDetail(stat) {
+    var avg = stat.sum / stat.count;
+    els.libDetailName.textContent = stat.name;
+    els.libDetailSum.textContent = stat.count + ' 次 · 平均 ' + fmtAvg(avg) +
+      ' · 上次 ' + lastText(stat.lastTs);
+
+    var history = [];
+    state.meals.forEach(function (meal) {
+      (meal.items || []).forEach(function (item) {
+        if (item.dishId === stat.id) history.push({ meal: meal, item: item });
+      });
+    });
+    history.sort(function (a, b) { return (b.meal.ts || 0) - (a.meal.ts || 0); });
+    els.libHistoryCount.textContent = history.length + ' 次';
+
+    els.libHistory.innerHTML = history.map(function (entry) {
+      var photo;
+      if (entry.item.photoBlob) {
+        var url = URL.createObjectURL(entry.item.photoBlob);
+        detailPhotoUrls.push(url);
+        photo = '<button type="button" class="history-thumb-btn" data-photo-open data-meal="' +
+          entry.meal.id + '" data-dish="' + stat.id + '" aria-label="看这张照片">' +
+          '<img class="history-thumb" src="' + url + '" alt=""></button>';
+      } else {
+        photo = '<span class="history-thumb history-thumb-empty" aria-hidden="true"></span>';
+      }
+      var place = placeName(entry.meal.placeId) || '没记地点';
+      return '<li class="history-row">' +
+        photo +
+        '<span class="history-main">' +
+          '<span class="history-when">' + dateText(entry.meal.ts) + '</span>' +
+          '<span class="history-place">' + escapeHtml(place) + '</span>' +
+        '</span>' +
+        '<button type="button" class="rating-badge rate-' + entry.item.rating +
+          '" data-edit-rating data-meal="' + entry.meal.id + '" data-dish="' + stat.id +
+          '" aria-label="改评分，现在是' + RATING_WORDS[entry.item.rating] + '">' +
+          RATING_WORDS[entry.item.rating] + '</button>' +
+        '<button type="button" class="history-del" data-del-history data-meal="' + entry.meal.id +
+          '" data-dish="' + stat.id + '" aria-label="删掉这条记录">' +
+          '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 4.5h9M6.5 4.5V3h3v1.5M5 4.5l.5 8h5l.5-8"/></svg>' +
+        '</button>' +
+      '</li>';
+    }).join('');
+  }
+
+  function renderLib() {
+    releaseDetailPhotoUrls();
+    releaseListPhotoUrls();
+    var placeIds = state.places.map(function (p) { return p.id; });
+    var total = totalDishRecords();
+    var stats = dishStats().sort(function (a, b) {
+      var scoreA = scoreFor(a, placeIds, total);
+      var scoreB = scoreFor(b, placeIds, total);
+      var valueA = scoreA ? scoreA.score : -1;
+      var valueB = scoreB ? scoreB.score : -1;
+      if (Math.abs(valueB - valueA) > 0.000001) return valueB - valueA;
+      if (a.count !== b.count) return b.count - a.count;
+      return b.lastTs - a.lastTs;
+    });
+    state.libStats = stats;
+    els.libCount.textContent = stats.length;
+
+    var hasDishes = stats.length > 0;
+    els.libEmpty.hidden = hasDishes;
+    els.libList.hidden = !hasDishes;
+    els.libList.innerHTML = hasDishes ? stats.map(libRowHtml).join('') : '';
+    els.libFoot.hidden = !hasDishes;
+
+    var current = state.libDishId
+      ? stats.filter(function (stat) { return stat.id === state.libDishId; })[0]
+      : null;
+    if (current) {
+      els.libOverview.hidden = true;
+      els.libDetail.hidden = false;
+      renderLibDetail(current);
+    } else {
+      state.libDishId = null;
+      els.libOverview.hidden = false;
+      els.libDetail.hidden = true;
+    }
+  }
+
+  /* ================= 纠错（T5） ================= */
+  var pendingUndo = null;
+
+  function commitPendingUndo() {
+    if (pendingUndo) {
+      clearTimeout(pendingUndo.timer);
+      pendingUndo = null;
+      hideToast();
+    }
+  }
+
+  function openDishMenu(dishId) {
+    var stat = state.libStats.filter(function (s) { return s.id === dishId; })[0];
+    if (!stat) return;
+    state.menuDishId = dishId;
+    els.dishMenuTitle.textContent = stat.name;
+    els.dishMenuSub.textContent = stat.count + ' 次 · 平均 ' +
+      fmtAvg(stat.sum / stat.count) + ' · 上次 ' + lastText(stat.lastTs);
+    showDialog(els.dishMenu);
+  }
+
+  function handleDishAction(action) {
+    var dishId = state.menuDishId;
+    closeDialog(els.dishMenu);
+    if (!dishId) return;
+    if (action === 'rename') openRenameDialog(dishId);
+    else if (action === 'merge') openMergeDialog(dishId);
+    else if (action === 'delete') confirmDeleteDish(dishId);
+  }
+
+  function openRenameDialog(dishId) {
+    var dish = dishById(dishId);
+    if (!dish) return;
+    state.renameDishId = dishId;
+    els.renameInput.value = dish.name;
+    els.renameError.hidden = true;
+    showDialog(els.renameDialog);
+    setTimeout(function () {
+      els.renameInput.focus();
+      els.renameInput.select();
+    }, 40);
+  }
+
+  function submitRename() {
+    var dish = dishById(state.renameDishId);
+    if (!dish) { closeDialog(els.renameDialog); return; }
+    commitPendingUndo();
+    var name = cleanName(els.renameInput.value);
+    if (!name) { showSheetError(els.renameError, '菜名不能为空'); return; }
+    if (name === dish.name) { closeDialog(els.renameDialog); return; }
+    var conflict = state.dishes.filter(function (d) {
+      return d.id !== dish.id && d.name.toLowerCase() === name.toLowerCase();
+    })[0];
+    if (conflict) {
+      showSheetError(els.renameError, '已经有「' + conflict.name + '」，可以合并过去');
+      return;
+    }
+
+    var oldName = dish.name;
+    var aliases = (dish.aliases || []).slice();
+    if (oldName.toLowerCase() !== name.toLowerCase() && aliases.indexOf(oldName) === -1) {
+      aliases.push(oldName);
+    }
+    dish.name = name;
+    dish.aliases = aliases;
+
+    var affected = mealsWithDish(dish.id);
+    affected.forEach(function (meal) {
+      (meal.items || []).forEach(function (item) {
+        if (item.dishId === dish.id) item.name = name;
+      });
+    });
+
+    closeDialog(els.renameDialog);
+    Promise.all([dbPut('dishes', dish)].concat(affected.map(function (meal) {
+      return dbPut('meals', meal);
+    }))).then(function () {
+      renderLib();
+      toast('已改名为「' + name + '」');
+    }).catch(function (err) {
+      console.error('改名失败', err);
+      toast('没改成：' + ((err && err.message) || '未知错误'));
+      loadAll().then(function () { renderLib(); renderAdd(); });
+    });
+  }
+
+  function openMergeDialog(dishId) {
+    var dish = dishById(dishId);
+    var stat = state.libStats.filter(function (s) { return s.id === dishId; })[0];
+    if (!dish || !stat) return;
+    var others = state.libStats.filter(function (s) { return s.id !== dishId; });
+    if (!others.length) {
+      toast('菜库里只有这一道菜，没得合并');
+      return;
+    }
+    state.mergeSourceId = dishId;
+    els.mergeSub.textContent = '「' + dish.name + '」的 ' + stat.count +
+      ' 次记录会并到下面这道菜里，次数相加。';
+    els.mergeSelect.innerHTML = others.map(function (s) {
+      return '<option value="' + s.id + '">' + escapeHtml(s.name) + ' · ' + s.count + ' 次</option>';
+    }).join('');
+    els.mergeError.hidden = true;
+    showDialog(els.mergeDialog);
+  }
+
+  function submitMerge() {
+    var source = dishById(state.mergeSourceId);
+    var target = dishById(els.mergeSelect.value);
+    if (!source || !target || source.id === target.id) return;
+    var sourceName = source.name;
+    var targetName = target.name;
+    closeDialog(els.mergeDialog);
+    mergeDish(source, target).then(function (moved) {
+      toast('已把「' + sourceName + '」并进「' + targetName + '」· ' + moved + ' 条');
+    }).catch(function (err) {
+      console.error('合并失败', err);
+      toast('没合并成：' + ((err && err.message) || '未知错误'));
+      loadAll().then(function () { renderLib(); });
+    });
+  }
+
+  function mergeDish(source, target) {
+    commitPendingUndo();
+    var affected = [];
+    var moved = 0;
+
+    state.meals.forEach(function (meal) {
+      var items = meal.items || [];
+      var sourceItem = null;
+      var targetItem = null;
+      items.forEach(function (item) {
+        if (item.dishId === source.id) sourceItem = item;
+        if (item.dishId === target.id) targetItem = item;
+      });
+      if (!sourceItem) return;
+
+      var index = items.indexOf(sourceItem);
+      items.splice(index, 1);
+
+      if (targetItem) {
+        // 同一餐里两道都有：保留一条，评分取高的，照片取有的
+        if (RATING_SCORES[sourceItem.rating] > RATING_SCORES[targetItem.rating]) {
+          targetItem.rating = sourceItem.rating;
+        }
+        if (!targetItem.photoBlob && sourceItem.photoBlob) {
+          targetItem.photoBlob = sourceItem.photoBlob;
+          targetItem.photoW = sourceItem.photoW;
+          targetItem.photoH = sourceItem.photoH;
+          targetItem.photoHash = sourceItem.photoHash;
+        targetItem.photoHist = sourceItem.photoHist;
+        }
+      } else {
+        sourceItem.dishId = target.id;
+        sourceItem.name = target.name;
+        items.splice(index, 0, sourceItem);
+      }
+      moved += 1;
+      affected.push(meal);
+    });
+
+    return Promise.all(affected.map(function (meal) {
+      return dbPut('meals', meal);
+    })).then(function () {
+      return dbDel('dishes', source.id);
+    }).then(function () {
+      state.dishes = state.dishes.filter(function (d) { return d.id !== source.id; });
+      if (state.libDishId === source.id) state.libDishId = target.id;
+      renderLib();
+      return moved;
+    });
+  }
+
+  function confirmDeleteDish(dishId) {
+    var dish = dishById(dishId);
+    var stat = state.libStats.filter(function (s) { return s.id === dishId; })[0];
+    if (!dish || !stat) return;
+    state.confirmAction = function () { deleteDish(dish); };
+    els.confirmTitle.textContent = '删除「' + dish.name + '」？';
+    els.confirmText.textContent = '它的 ' + stat.count + ' 次记录会一起删掉，删了不能恢复。';
+    showDialog(els.confirmDialog);
+  }
+
+  function deleteDish(dish) {
+    commitPendingUndo();
+    var affected = [];
+    state.meals.forEach(function (meal) {
+      var items = meal.items || [];
+      var left = items.filter(function (item) { return item.dishId !== dish.id; });
+      if (left.length === items.length) return;
+      meal.items = left;
+      affected.push(meal);
+    });
+    var empty = affected.filter(function (meal) { return meal.items.length === 0; });
+    var kept = affected.filter(function (meal) { return meal.items.length > 0; });
+
+    Promise.all(
+      kept.map(function (meal) { return dbPut('meals', meal); }).concat(
+        empty.map(function (meal) { return dbDel('meals', meal.id); })
+      )
+    ).then(function () {
+      return dbDel('dishes', dish.id);
+    }).then(function () {
+      state.dishes = state.dishes.filter(function (d) { return d.id !== dish.id; });
+      state.meals = state.meals.filter(function (meal) { return meal.items.length > 0; });
+      if (state.libDishId === dish.id) state.libDishId = null;
+      renderLib();
+      renderPick();
+      toast('已删除「' + dish.name + '」');
+    }).catch(function (err) {
+      console.error('删除菜品失败', err);
+      toast('没删成：' + ((err && err.message) || '未知错误'));
+      loadAll().then(function () { renderLib(); });
+    });
+  }
+
+  function openRatingDialog(mealId, dishId) {
+    var meal = state.meals.filter(function (m) { return m.id === mealId; })[0];
+    var item = meal && (meal.items || []).filter(function (i) { return i.dishId === dishId; })[0];
+    if (!meal || !item) return;
+    state.ratingTarget = { mealId: mealId, dishId: dishId };
+    els.ratingSub.textContent = item.name + ' · ' + dateText(meal.ts);
+    $$('#rating-dialog .rate').forEach(function (btn) {
+      var same = parseInt(btn.getAttribute('data-pick-rating'), 10) === item.rating;
+      btn.setAttribute('aria-pressed', same ? 'true' : 'false');
+    });
+    showDialog(els.ratingDialog);
+  }
+
+  function submitRating(value) {
+    var target = state.ratingTarget;
+    if (!target) return;
+    var meal = state.meals.filter(function (m) { return m.id === target.mealId; })[0];
+    var item = meal && (meal.items || []).filter(function (i) { return i.dishId === target.dishId; })[0];
+    if (!meal || !item) { closeDialog(els.ratingDialog); return; }
+    closeDialog(els.ratingDialog);
+    if (item.rating === value) return;
+
+    var previous = item.rating;
+    item.rating = value;
+    dbPut('meals', meal).then(function () {
+      renderLib();
+      toast('已改成「' + RATING_WORDS[value] + '」', {
+        action: '撤销',
+        duration: 5000,
+        onAction: function () {
+          item.rating = previous;
+          dbPut('meals', meal).then(function () {
+            renderLib();
+            toast('已还原为「' + RATING_WORDS[previous] + '」');
+          });
+        }
+      });
+    }).catch(function (err) {
+      item.rating = previous;
+      console.error('改评分失败', err);
+      toast('没改成：' + ((err && err.message) || '未知错误'));
+    });
+  }
+
+  function deleteHistoryItem(mealId, dishId) {
+    var meal = state.meals.filter(function (m) { return m.id === mealId; })[0];
+    if (!meal) return;
+    var index = -1;
+    (meal.items || []).forEach(function (item, i) {
+      if (item.dishId === dishId) index = i;
+    });
+    if (index === -1) return;
+
+    var removed = meal.items[index];
+    var snapshot = {
+      id: meal.id,
+      ts: meal.ts,
+      placeId: meal.placeId,
+      items: meal.items.slice()
+    };
+    var wasLast = meal.items.length === 1;
+    var keepDetailId = state.libDishId;
+
+    meal.items.splice(index, 1);
+    if (wasLast) {
+      state.meals = state.meals.filter(function (m) { return m.id !== meal.id; });
+    }
+    renderLib();
+
+    if (pendingUndo) {
+      clearTimeout(pendingUndo.timer);
+      pendingUndo = null;
+    }
+
+    var persist = wasLast ? dbDel('meals', meal.id) : dbPut('meals', meal);
+    persist.then(function () {
+      pendingUndo = {
+        timer: setTimeout(function () { pendingUndo = null; }, 5000),
+        undo: function () {
+          clearTimeout(pendingUndo.timer);
+          pendingUndo = null;
+          var restored = {
+            id: snapshot.id,
+            ts: snapshot.ts,
+            placeId: snapshot.placeId,
+            items: snapshot.items.slice()
+          };
+          var existing = state.meals.filter(function (m) { return m.id === restored.id; })[0];
+          if (existing) existing.items = restored.items;
+          else state.meals.push(restored);
+          if (keepDetailId) state.libDishId = keepDetailId;
+          dbPut('meals', restored).then(function () {
+            renderLib();
+            toast('已撤销删除');
+          }).catch(function (err) {
+            console.error('撤销删除失败', err);
+            toast('撤销没成功：' + ((err && err.message) || '未知错误'));
+          });
+        }
+      };
+      toast('删掉了「' + removed.name + '」的一次记录', {
+        action: '撤销',
+        duration: 5000,
+        onAction: function () {
+          if (pendingUndo) pendingUndo.undo();
+        }
+      });
+    }).catch(function (err) {
+      console.error('删除记录失败', err);
+      toast('删除失败：' + ((err && err.message) || '未知错误'));
+      loadAll().then(function () { renderLib(); });
+    });
+  }
+
+  function renderPick() {
+    var count = state.feedback.length;
+    var pcts = weightPercents(state.weights);
+    var head;
+    if (state.learned) {
+      head = '已从 <b id="fb-count">' + count + '</b> 次选择中学习';
+    } else if (count < MIN_FEEDBACK) {
+      head = '还在观察你（<b id="fb-count">' + count + '</b>/' + MIN_FEEDBACK + ' 次选择）';
+    } else {
+      head = '反馈还不够均衡（<b id="fb-count">' + count + '</b> 次）';
+    }
+    els.learning.innerHTML = head +
+      '<span class="learning-weights">口味 <b id="w-q">' + pcts[0] + '%</b>' +
+      ' · 多久没吃 <b id="w-f">' + pcts[1] + '%</b>' +
+      ' · 距离 <b id="w-d">' + pcts[2] + '%</b></span>';
+    syncPickState();
+  }
+
+  /* ================= 路由 / tabbar ================= */
+  function showScreen(name, options) {
+    if (SCREENS.indexOf(name) === -1) name = 'add';
+    state.screen = name;
+
+    SCREENS.forEach(function (key) {
+      var active = key === name;
+      els.screens[key].classList.toggle('is-active', active);
+      els.screens[key].setAttribute('aria-hidden', active ? 'false' : 'true');
+      els.tabs[key].setAttribute('aria-selected', active ? 'true' : 'false');
+      els.tabs[key].tabIndex = active ? 0 : -1;
+    });
+
+    if (name === 'add') renderAdd();
+    if (name === 'lib') renderLib();
+    if (name === 'pick') renderPick();
+
+    document.title = TITLES[name] + ' · 今天吃啥';
+
+    if (!options || options.syncHash !== false) {
+      if (location.hash !== '#' + name) location.hash = name;
+    }
+  }
+
+  function screenFromHash() {
+    var name = location.hash.replace(/^#/, '');
+    return SCREENS.indexOf(name) !== -1 ? name : 'add';
+  }
+
+  /* ================= 交互 ================= */
+  var toastTimer = null;
+  function hideToast() {
+    els.toast.classList.remove('show');
+  }
+  function toast(message, options) {
+    options = options || {};
+    clearTimeout(toastTimer);
+    els.toast.innerHTML = '';
+    var text = document.createElement('span');
+    text.textContent = message;
+    els.toast.appendChild(text);
+    if (options.action) {
+      var action = document.createElement('button');
+      action.type = 'button';
+      action.className = 'toast-action';
+      action.textContent = options.action;
+      action.addEventListener('click', function () {
+        hideToast();
+        if (typeof options.onAction === 'function') options.onAction();
+      });
+      els.toast.appendChild(action);
+    }
+    els.toast.classList.add('show');
+    toastTimer = setTimeout(hideToast, options.duration || 2000);
+  }
+
+  function togglePlace(id) {
+    if (state.selectedPlaces.has(id)) state.selectedPlaces.delete(id);
+    else state.selectedPlaces.add(id);
+    syncChips();
+  }
+
+  document.addEventListener('click', function (event) {
+    var target = event.target instanceof Element ? event.target : null;
+    if (!target) return;
+
+    var tab = target.closest('[data-tab]');
+    if (tab) {
+      showScreen(tab.getAttribute('data-tab'));
+      return;
+    }
+
+    var openDish = target.closest('[data-open-dish]');
+    if (openDish) {
+      state.libDishId = openDish.getAttribute('data-open-dish');
+      renderLib();
+      els.screens.lib.scrollTop = 0;
+      return;
+    }
+
+    if (target.closest('[data-lib-back]')) {
+      state.libDishId = null;
+      renderLib();
+      els.screens.lib.scrollTop = 0;
+      return;
+    }
+
+    var moreBtn = target.closest('[data-more-dish]');
+    if (moreBtn) {
+      openDishMenu(moreBtn.getAttribute('data-more-dish'));
+      return;
+    }
+
+    var dishAction = target.closest('[data-dish-action]');
+    if (dishAction) {
+      handleDishAction(dishAction.getAttribute('data-dish-action'));
+      return;
+    }
+
+    var editRating = target.closest('[data-edit-rating]');
+    if (editRating) {
+      openRatingDialog(editRating.getAttribute('data-meal'), editRating.getAttribute('data-dish'));
+      return;
+    }
+
+    var delHistory = target.closest('[data-del-history]');
+    if (delHistory) {
+      deleteHistoryItem(delHistory.getAttribute('data-meal'), delHistory.getAttribute('data-dish'));
+      return;
+    }
+
+    var pickRating = target.closest('[data-pick-rating]');
+    if (pickRating) {
+      submitRating(parseInt(pickRating.getAttribute('data-pick-rating'), 10));
+      return;
+    }
+
+    if (target.closest('#add-first') || target.closest('#add-dish') || target.closest('#add-new-dish')) {
+      addDraftItem();
+      return;
+    }
+
+    var recentBtn = target.closest('[data-recent-dish]');
+    if (recentBtn) {
+      addRecentDish(recentBtn.getAttribute('data-recent-dish'));
+      return;
+    }
+
+    var photoBtn = target.closest('[data-photo]');
+    if (photoBtn) {
+      takePhoto(photoBtn.getAttribute('data-photo'));
+      return;
+    }
+
+    var delBtn = target.closest('[data-del]');
+    if (delBtn) {
+      removeDraftItem(delBtn.getAttribute('data-del'));
+      return;
+    }
+
+    var photoYes = target.closest('[data-photo-yes]');
+    if (photoYes) {
+      confirmPhotoMatch(photoYes.getAttribute('data-photo-yes'));
+      return;
+    }
+
+    var photoNo = target.closest('[data-photo-no]');
+    if (photoNo) {
+      rejectPhotoMatch(photoNo.getAttribute('data-photo-no'));
+      return;
+    }
+
+    var photoOpen = target.closest('[data-photo-open]');
+    if (photoOpen) {
+      openPhotoView(photoOpen.getAttribute('data-meal'), photoOpen.getAttribute('data-dish'));
+      return;
+    }
+
+    if (target.closest('#photo-view')) {
+      closePhotoView();
+      return;
+    }
+
+    var useName = target.closest('[data-use-name]');
+    if (useName) {
+      useNameMatch(useName.getAttribute('data-use-name'));
+      return;
+    }
+
+    var dismissName = target.closest('[data-dismiss-name]');
+    if (dismissName) {
+      dismissNameMatch(dismissName.getAttribute('data-dismiss-name'));
+      return;
+    }
+
+    var rateBtn = target.closest('[data-rate]');
+    if (rateBtn) {
+      setRating(rateBtn.getAttribute('data-key'), parseInt(rateBtn.getAttribute('data-rate'), 10));
+      return;
+    }
+
+    if (target.closest('#manage-place')) {
+      openPlaceManage();
+      return;
+    }
+
+    if (target.closest('#place-manage-close')) {
+      closePlaceManage();
+      return;
+    }
+
+    var editPlaceBtn = target.closest('[data-place-edit]');
+    if (editPlaceBtn) {
+      openPlaceDialog(placeById(editPlaceBtn.getAttribute('data-place-edit')));
+      return;
+    }
+
+    var delPlaceBtn = target.closest('[data-place-del]');
+    if (delPlaceBtn) {
+      deletePlace(delPlaceBtn.getAttribute('data-place-del'));
+      return;
+    }
+
+    if (target.closest('#add-place')) {
+      openPlaceDialog();
+      return;
+    }
+
+    var todo = target.closest('[data-todo]');
+    if (todo) {
+      toast(todo.getAttribute('data-todo'));
+      return;
+    }
+
+    var chip = target.closest('#place-chips [data-place]');
+    if (chip) {
+      togglePlace(chip.getAttribute('data-place'));
+      return;
+    }
+
+    var bulk = target.closest('[data-places]');
+    if (bulk) {
+      if (bulk.getAttribute('data-places') === 'all') {
+        state.selectedPlaces = new Set(state.places.map(function (p) { return p.id; }));
+      } else {
+        state.selectedPlaces.clear();
+      }
+      syncChips();
+    }
+  });
+
+  els.placeSelect.addEventListener('change', function () {
+    state.draftPlaceId = els.placeSelect.value;
+    rememberPlace(state.draftPlaceId);
+    updateSaveState();
+  });
+
+  els.draftList.addEventListener('input', function (event) {
+    var input = event.target.closest ? event.target.closest('.dish-name') : null;
+    if (!input) return;
+    var item = draftItem(input.getAttribute('data-name'));
+    if (!item) return;
+    item.name = input.value;
+    if (item.photoMatch && cleanName(item.name) === item.photoMatch.name) {
+      item.photoMatch = null;
+      var box = input.closest('.dish-body').querySelector('.photo-suggest');
+      if (box) box.remove();
+    }
+    if (item.nameSuggestDismissed &&
+        item.nameSuggestDismissed !== normalizeNameForMatch(item.name)) {
+      item.nameSuggestDismissed = null;
+    }
+    refreshNameSuggest(item);
+    updateSaveState();
+  });
+
+  els.photoInput.addEventListener('change', function () {
+    var file = els.photoInput.files && els.photoInput.files[0];
+    els.photoInput.value = '';
+    handlePhotoFile(file);
+  });
+
+  els.saveMeal.addEventListener('click', saveMeal);
+  els.pickBtn.addEventListener('click', function () { doPick(null); });
+  els.pickAgain.addEventListener('click', advancePick);
+  els.pickAccept.addEventListener('click', acceptPick);
+
+  els.placeForm.addEventListener('submit', function (event) {
+    event.preventDefault();
+    submitPlace();
+  });
+  els.placeCancel.addEventListener('click', closePlaceDialog);
+  els.placeDialog.addEventListener('click', function (event) {
+    if (event.target === els.placeDialog) closePlaceDialog();
+  });
+
+  els.renameForm.addEventListener('submit', function (event) {
+    event.preventDefault();
+    submitRename();
+  });
+  els.renameCancel.addEventListener('click', function () { closeDialog(els.renameDialog); });
+
+  els.mergeForm.addEventListener('submit', function (event) {
+    event.preventDefault();
+    submitMerge();
+  });
+  els.mergeCancel.addEventListener('click', function () { closeDialog(els.mergeDialog); });
+
+  els.ratingCancel.addEventListener('click', function () { closeDialog(els.ratingDialog); });
+
+  els.confirmOk.addEventListener('click', function () {
+    var action = state.confirmAction;
+    state.confirmAction = null;
+    closeDialog(els.confirmDialog);
+    if (action) action();
+  });
+  els.confirmCancel.addEventListener('click', function () {
+    state.confirmAction = null;
+    closeDialog(els.confirmDialog);
+  });
+
+  [els.dishMenu, els.renameDialog, els.mergeDialog, els.confirmDialog, els.ratingDialog].forEach(function (dialog) {
+    dialog.addEventListener('click', function (event) {
+      if (event.target === dialog) closeDialog(dialog);
+    });
+  });
+
+  $$('.tabbar .tab').forEach(function (tab) {
+    tab.addEventListener('keydown', function (event) {
+      if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+      event.preventDefault();
+      var current = SCREENS.indexOf(state.screen);
+      var next = (current + (event.key === 'ArrowRight' ? 1 : -1) + SCREENS.length) % SCREENS.length;
+      showScreen(SCREENS[next]);
+      els.tabs[SCREENS[next]].focus();
+    });
+  });
+
+  window.addEventListener('hashchange', function () {
+    showScreen(screenFromHash(), { syncHash: false });
+  });
+
+  /* ================= 启动 ================= */
+  setDateLabel();
+  buildPlaceSelect();
+  buildPlaceChips();
+  renderPick();
+  showScreen(screenFromHash());
+
+  loadAll().then(function () {
+    buildPlaceSelect();
+    buildPlaceChips();
+    renderAdd();
+    renderLib();
+    renderPick();
+    if (state.storageError) toast('本地存储不可用，这一餐可能存不下');
+    else setTimeout(backfillPhotoHashes, 800);
+  });
+
+  // 暴露少量状态与存储原语，供后续任务接管 / 自检（不参与界面逻辑）
+  window.EatWhat = {
+    state: state,
+    showScreen: showScreen,
+    toast: toast,
+    openDB: openDB,
+    dbAll: dbAll,
+    dbPut: dbPut,
+    dbDel: dbDel,
+    loadAll: loadAll,
+    computeDHash: computeDHash,
+    computePhotoMarks: computePhotoMarks,
+    photoSimilarity: photoSimilarity,
+    nameSimilarity: nameSimilarity,
+    buildCandidates: buildCandidates,
+    scoreDish: scoreDish,
+    totalDishRecords: totalDishRecords,
+    trainWeights: trainWeights,
+    applyLearnedWeights: applyLearnedWeights,
+    weightPercents: weightPercents
+  };
+})();
+</script>
+
+</body>
+</html>
